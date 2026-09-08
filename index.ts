@@ -1,146 +1,129 @@
-import { serve } from "bun";
-import { join } from "node:path";
-import fs from "node:fs";
-import { createWavBuffer } from "./src/sarvam.ts";
+import { VoiceStreamManager } from "./src/server/voice-stream-manager.ts";
+import { VoiceServer } from "./src/server/voice-server.ts";
+import { SarvamSttBridge } from "./src/server/sarvam-stt-bridge.ts";
+import { SarvamBatchSttBridge } from "./src/server/sarvam-batch-stt-bridge.ts";
+import { GeminiBridge } from "./src/server/gemini-bridge.ts";
+import { TtsBridge } from "./src/server/tts-bridge.ts";
+import { SessionMessenger } from "./src/server/session-messenger.ts";
+import { getSarvamSttMode, getSarvamSttModeLabel, getSarvamOutputMode, isSarvamConfigured } from "./src/server/sarvam-stt.ts";
+import { getGeminiModelName, isGeminiConfigured } from "./src/server/gemini-client.ts";
+import { getTtsConfig, isSarvamTtsConfigured } from "./src/server/sarvam-tts.ts";
+import { log } from "./src/server/logger.ts";
+import type { TranscriptResult } from "./src/server/sarvam-stt-bridge.ts";
 
-// 1. Build client bundle
-const build = await Bun.build({
-  entrypoints: ["src/client.ts"],
-  outdir: "public",
-  target: "browser",
-  sourcemap: "inline",
+const streamManager = new VoiceStreamManager();
+const sttMode = getSarvamSttMode();
+const sttModeLabel = isSarvamConfigured() ? getSarvamSttModeLabel(sttMode) : "disabled";
+const sttOutput = getSarvamOutputMode();
+
+let geminiBridge: GeminiBridge | undefined;
+let ttsBridge: TtsBridge | undefined;
+
+streamManager.onStreamStart((session) => {
+  log.info("Stream", "Started", {
+    session: session.id,
+    stt: sttModeLabel,
+    device: session.metadata?.device ?? "default",
+  });
 });
 
-if (!build.success) {
-  console.error("❌ Failed to compile client TypeScript:", build.logs);
-  process.exit(1);
-}
-
-interface ClientSocketData {
-  socketId: string;
-  totalChunks: number;
-  totalBytes: number;
-  pcmChunks: Uint8Array[];
-}
-
-const PORT = Number(process.env.PORT) || 3000;
-
-// 2. Start HTTP & WebSocket Server
-const server = serve<ClientSocketData>({
-  port: PORT,
-  async fetch(req, server) {
-    const url = new URL(req.url);
-
-    // WebSocket upgrade
-    if (url.pathname === "/ws") {
-      const socketId = crypto.randomUUID().slice(0, 8);
-      const upgraded = server.upgrade(req, {
-        data: {
-          socketId,
-          totalChunks: 0,
-          totalBytes: 0,
-          pcmChunks: [],
-        },
-      });
-      return upgraded ? undefined : new Response("WebSocket upgrade failed", { status: 400 });
-    }
-
-    // Static file serving from public
-    const filePath = join("public", url.pathname === "/" ? "index.html" : url.pathname);
-    const file = Bun.file(filePath);
-
-    if (await file.exists()) {
-      return new Response(file, {
-        headers: { "Cache-Control": "no-cache" },
-      });
-    }
-
-    return new Response("File not found", { status: 404 });
-  },
-
-  websocket: {
-    open(ws) {
-      console.log(`🟢 [WS Connected] Client ID: ${ws.data.socketId}`);
-      ws.send(JSON.stringify({ type: "welcome", socketId: ws.data.socketId }));
-    },
-
-    async message(ws, message) {
-      if (typeof message === "string") {
-        try {
-          const payload = JSON.parse(message) as Record<string, unknown>;
-
-          // Speech analyzed by Browser Web Speech API
-          if (payload.type === "browser_speech") {
-            const isFinal = Boolean(payload.isFinal);
-            const status = isFinal ? "FINAL" : "INTERIM";
-            const text = String(payload.transcript ?? "").trim();
-            if (!text) return;
-
-            const lang = String(payload.language ?? "gu-IN");
-            const conf = payload.confidence ? ` (Conf: ${(Number(payload.confidence) * 100).toFixed(1)}%)` : "";
-            console.log(`\n================== [Converted Text - ${status} (${lang})] ==================`);
-            console.log(`📝 "${text}"${conf}`);
-            console.log(`==========================================================================\n`);
-
-            // Append finalized converted text to transcripts.log
-            if (isFinal) {
-              const logEntry = `[${new Date().toISOString()}] [${lang}] [Client: ${ws.data.socketId}] ${text}\n`;
-              fs.appendFileSync("transcripts.log", logEntry);
-            }
-            return;
-          }
-
-          if (payload.type === "stream_start") {
-            ws.data.totalChunks = 0;
-            ws.data.totalBytes = 0;
-            ws.data.pcmChunks = [];
-
-            console.log(
-              `\n🎤 [Mic Stream Started] Client: ${ws.data.socketId}` +
-              ` | Device: "${String(payload.device ?? "Mic")}"` +
-              ` | Speech Analyzer: Browser Web Speech API`
-            );
-          } else if (payload.type === "stream_stop") {
-            console.log(
-              `\n🛑 [Mic Stream Stopped] Client: ${ws.data.socketId}` +
-              ` | Audio Chunks: ${ws.data.totalChunks}` +
-              ` | Total Audio: ${(ws.data.totalBytes / 1024).toFixed(2)} KB`
-            );
-
-            // Save standard WAV recording for archiving/playback if chunks were sent
-            if (ws.data.pcmChunks.length > 0) {
-              const totalLength = ws.data.pcmChunks.reduce((sum, c) => sum + c.length, 0);
-              const combinedPcm = new Uint8Array(totalLength);
-              let offset = 0;
-              for (const chunk of ws.data.pcmChunks) {
-                combinedPcm.set(chunk, offset);
-                offset += chunk.length;
-              }
-
-              const wavBuffer = createWavBuffer(combinedPcm, 16000);
-              await Bun.write("recording.wav", wavBuffer);
-            }
-          }
-        } catch {
-          console.log(`💬 [WS Text] Client ${ws.data.socketId}: ${message}`);
-        }
-      } else {
-        // Binary audio chunk (16kHz PCM)
-        const chunk = new Uint8Array(message);
-        ws.data.pcmChunks.push(chunk);
-        ws.data.totalChunks++;
-        ws.data.totalBytes += chunk.byteLength;
-      }
-    },
-
-    close(ws, code, reason) {
-      console.log(
-        `🔴 [WS Disconnected] Client: ${ws.data.socketId} ` +
-        `(${ws.data.totalChunks} chunks, ${(ws.data.totalBytes / 1024).toFixed(1)} KB, reason: ${reason || code})`
-      );
-    },
-  },
+streamManager.onStreamStop((session) => {
+  log.info("Stream", "Stopped", {
+    session: session.id,
+    chunks: session.totalChunks,
+    kb: (session.totalBytes / 1024).toFixed(1),
+    sec: (session.totalDurationMs / 1000).toFixed(1),
+  });
+  geminiBridge?.clearSession(session.id);
+  ttsBridge?.clearSession(session.id);
 });
 
-console.log(`\n🎙️ Voice Assistant running at: http://localhost:${server.port}`);
-console.log(`🗣️ Speech Analysis: Browser Web Speech API streaming live to backend\n`);
+streamManager.onError((sessionId, error) => {
+  log.error("Stream", "Error", { session: sessionId, error: error.message });
+});
+
+const server = new VoiceServer({
+  port: Number(process.env.PORT) || 3000,
+  streamManager,
+});
+
+const messenger = new SessionMessenger(server);
+
+await server.start();
+
+if (isSarvamTtsConfigured()) {
+  ttsBridge = new TtsBridge(
+    (sessionId, payload) => {
+      messenger.ttsAudio(sessionId, payload);
+    },
+    {
+      onError: (sessionId, error) => {
+        messenger.error(sessionId, `TTS error: ${error.message}`);
+      },
+    }
+  );
+  const ttsConfig = getTtsConfig();
+  log.info("Server", "Sarvam TTS ready", ttsConfig);
+} else {
+  log.warn("Server", "Sarvam TTS disabled — set SARVAM_API_KEY in .env");
+}
+
+if (isGeminiConfigured()) {
+  geminiBridge = new GeminiBridge(
+    (sessionId, chunk) => {
+      messenger.llmFinal(sessionId, chunk);
+    },
+    {
+      sttModeLabel,
+      sttOutput,
+      ttsBridge,
+      onGenerating: (sessionId, turnId) => {
+        messenger.llmGenerating(sessionId, turnId);
+      },
+      onError: (sessionId, error) => {
+        messenger.error(sessionId, `LLM error: ${error.message}`);
+      },
+    }
+  );
+  log.info("Server", "Gemini ready", { model: getGeminiModelName() });
+} else {
+  log.warn("Server", "Gemini disabled — set GEMINI_API_KEY in .env");
+}
+
+if (isSarvamConfigured()) {
+  const onTranscript = (sessionId: string, result: TranscriptResult) => {
+    messenger.transcript(sessionId, result);
+
+    if (result.isFinal) {
+      log.info("STT", "Final transcript", {
+        session: sessionId,
+        lang: result.language ?? "unknown",
+        text: result.text,
+      });
+      geminiBridge?.handleFinalTranscript(sessionId, result);
+    } else if (sttMode === "realtime") {
+      log.debug("STT", "Partial transcript", { session: sessionId, text: result.text });
+    }
+  };
+
+  const onSttError = (sessionId: string, error: Error) => {
+    log.error("STT", "Error", { session: sessionId, error: error.message });
+    messenger.error(sessionId, `STT error: ${error.message}`);
+  };
+
+  if (sttMode === "realtime") {
+    new SarvamSttBridge(streamManager, onTranscript, onSttError);
+    log.info("Server", "Sarvam STT ready", { mode: "realtime", engine: sttModeLabel });
+  } else {
+    new SarvamBatchSttBridge(streamManager, onTranscript, onSttError);
+    log.info("Server", "Sarvam STT ready", {
+      mode: "batch",
+      engine: sttModeLabel,
+      silenceMs: process.env.SARVAM_SILENCE_MS ?? 500,
+    });
+  }
+} else {
+  log.warn("Server", "Sarvam STT disabled — set SARVAM_API_KEY in .env");
+}
+
+log.info("Server", "Voice assistant running", { url: `http://localhost:${server.port}` });

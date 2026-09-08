@@ -2,11 +2,10 @@
   "name": "va",
   "module": "index.ts",
   "type": "module",
-  "private": true,
   "scripts": {
     "start": "bun run index.ts",
     "dev": "bun --watch index.ts",
-    "build": "bun build src/client.ts --outdir public --target browser",
+    "build": "bun build src/client/app.ts --outdir public --target browser",
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
@@ -16,6 +15,8 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "sarvamai": "^1.1.8"
+    "@google/generative-ai": "^0.24.1",
+    "sarvamai": "^1.1.8",
+    "zod": "^4.5.4"
   }
 }

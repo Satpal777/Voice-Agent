@@ -1,26 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Capture microphone audio stream from HTML and log stream details and chunks in real-time." />
-  <title>Microphone Stream Logger | Voice Assistant</title>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Voice Assistant - Voice Input Stream</title>
   <style>
     :root {
-      --bg-primary: #0b0f19;
-      --bg-surface: #151d2e;
-      --bg-surface-elevated: #1e293b;
-      --border-color: #334155;
+      --bg-primary: #0f172a;
+      --bg-card: #1e293b;
       --text-main: #f8fafc;
       --text-muted: #94a3b8;
-      --accent-blue: #38bdf8;
-      --accent-blue-hover: #0284c7;
-      --accent-green: #10b981;
-      --accent-red: #ef4444;
-      --accent-red-hover: #dc2626;
-      --accent-amber: #f59e0b;
-      --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-      --font-sans: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
+      --border-color: #334155;
+      --primary: #3b82f6;
+      --primary-hover: #2563eb;
+      --danger: #ef4444;
+      --danger-hover: #dc2626;
+      --color-disconnected: #64748b;
+      --color-connecting: #eab308;
+      --color-connected: #10b981;
+      --color-recording: #ef4444;
     }
 
     * {
@@ -30,468 +28,327 @@
     }
 
     body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
       background-color: var(--bg-primary);
       color: var(--text-main);
-      font-family: var(--font-sans);
-      line-height: 1.5;
       min-height: 100vh;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 2rem 1rem;
+      justify-content: center;
+      padding: 1.5rem;
     }
 
     .container {
       width: 100%;
-      max-width: 900px;
-      display: flex;
-      flex-direction: column;
-      gap: 1.5rem;
+      max-width: 580px;
+      background-color: var(--bg-card);
+      border: 1px solid var(--border-color);
+      border-radius: 1rem;
+      padding: 2rem;
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
     }
 
-    /* Header */
     header {
       display: flex;
-      flex-wrap: wrap;
-      justify-content: space-between;
       align-items: center;
-      gap: 1rem;
+      justify-content: space-between;
+      margin-bottom: 1.5rem;
+      padding-bottom: 1rem;
       border-bottom: 1px solid var(--border-color);
-      padding-bottom: 1.25rem;
     }
 
-    .brand-title {
-      font-size: 1.6rem;
+    h1 {
+      font-size: 1.25rem;
       font-weight: 700;
-      letter-spacing: -0.025em;
       display: flex;
       align-items: center;
       gap: 0.5rem;
-    }
-
-    .brand-subtitle {
-      font-size: 0.9rem;
-      color: var(--text-muted);
-      margin-top: 0.2rem;
-    }
-
-    .header-badges {
-      display: flex;
-      gap: 0.75rem;
-      align-items: center;
     }
 
     .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.45rem;
-      font-size: 0.8rem;
-      font-weight: 500;
-      padding: 0.35rem 0.75rem;
-      background-color: var(--bg-surface);
-      border: 1px solid var(--border-color);
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.25rem 0.75rem;
       border-radius: 9999px;
+      background-color: var(--color-disconnected);
+      color: #ffffff;
+      transition: background-color 0.2s ease;
     }
 
-    .indicator {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      display: inline-block;
+    .form-group {
+      margin-bottom: 1.25rem;
     }
 
-    .indicator.inactive {
-      background-color: var(--text-muted);
+    label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
     }
 
-    .indicator.active {
-      background-color: var(--accent-green);
-      box-shadow: 0 0 8px rgba(16, 185, 129, 0.7);
-    }
-
-    .indicator.connecting {
-      background-color: var(--accent-amber);
-      animation: pulse 1.5s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.3; }
-    }
-
-    /* Card Panels */
-    .card {
-      background-color: var(--bg-surface);
+    select {
+      width: 100%;
+      padding: 0.75rem 1rem;
+      border-radius: 0.5rem;
+      background-color: #0f172a;
       border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 1.5rem;
-      box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3), 0 2px 4px -2px rgba(0, 0, 0, 0.2);
+      color: var(--text-main);
+      font-size: 0.875rem;
+      outline: none;
+      transition: border-color 0.2s ease;
     }
 
-    .card-title {
-      font-size: 1.1rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    select:focus {
+      border-color: var(--primary);
+      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
     }
 
-    /* Controls */
-    .controls-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      align-items: center;
-    }
-
-    button {
-      cursor: pointer;
-      font-family: inherit;
-      font-size: 0.95rem;
-      font-weight: 600;
-      padding: 0.7rem 1.4rem;
-      border-radius: 8px;
-      border: 1px solid transparent;
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      transition: all 0.15s ease-in-out;
-    }
-
-    button:focus-visible {
-      outline: 2px solid var(--accent-blue);
-      outline-offset: 2px;
-    }
-
-    button:disabled {
-      opacity: 0.5;
+    select:disabled {
+      opacity: 0.6;
       cursor: not-allowed;
     }
 
-    .btn-primary {
-      background-color: #2563eb;
-      color: #ffffff;
+    .volume-container {
+      margin-bottom: 1.5rem;
     }
 
-    .btn-primary:hover:not(:disabled) {
-      background-color: #1d4ed8;
-    }
-
-    .btn-danger {
-      background-color: var(--accent-red);
-      color: #ffffff;
-    }
-
-    .btn-danger:hover:not(:disabled) {
-      background-color: var(--accent-red-hover);
-    }
-
-    .btn-secondary {
-      background-color: transparent;
+    .volume-bar-bg {
+      height: 10px;
+      background-color: #0f172a;
+      border-radius: 5px;
+      overflow: hidden;
       border: 1px solid var(--border-color);
-      color: var(--text-main);
     }
 
-    .btn-secondary:hover:not(:disabled) {
-      background-color: var(--bg-surface-elevated);
+    .volume-bar {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #10b981 0%, #3b82f6 70%, #ef4444 100%);
+      border-radius: 5px;
+      transition: width 0.05s ease-out;
     }
 
-    .select-lang {
-      background-color: var(--bg-surface-elevated);
-      color: var(--text-main);
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 0.65rem 1rem;
-      font-size: 0.95rem;
-      font-family: inherit;
-      font-weight: 500;
+    .btn-main {
+      width: 100%;
+      padding: 1rem;
+      border: none;
+      border-radius: 0.5rem;
+      background-color: var(--primary);
+      color: white;
+      font-size: 1rem;
+      font-weight: 600;
       cursor: pointer;
-      outline: none;
-      transition: border-color 0.15s ease-in-out;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      transition: background-color 0.2s ease, transform 0.1s ease;
     }
 
-    .select-lang:focus-visible {
-      border-color: var(--accent-blue);
-      outline: 2px solid var(--accent-blue);
+    .btn-main:hover:not(:disabled) {
+      background-color: var(--primary-hover);
+    }
+
+    .btn-main:focus-visible {
+      outline: 2px solid #ffffff;
       outline-offset: 2px;
     }
 
-    /* Stream details */
-    .stream-stats-panel {
-      margin-top: 1rem;
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.5rem;
+    .btn-main.recording {
+      background-color: var(--danger);
     }
 
-    .stat-badge {
-      font-size: 0.8rem;
-      background-color: var(--bg-surface-elevated);
+    .btn-main.recording:hover:not(:disabled) {
+      background-color: var(--danger-hover);
+    }
+
+    .btn-main:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+    }
+
+    .stats-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 0.75rem;
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .stat-card {
+      background-color: #0f172a;
       border: 1px solid var(--border-color);
-      padding: 0.3rem 0.6rem;
-      border-radius: 6px;
-      color: var(--text-muted);
+      border-radius: 0.5rem;
+      padding: 0.75rem;
+      text-align: center;
     }
 
-    .stat-badge strong {
+    .stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-bottom: 0.25rem;
+    }
+
+    .stat-value {
+      font-size: 1.125rem;
+      font-weight: 700;
       color: var(--text-main);
+      font-variant-numeric: tabular-nums;
     }
 
-    /* Visualizer & Volume */
-    .meter-container {
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
+    .spec-info {
       margin-top: 1.25rem;
-    }
-
-    .meter-header {
-      display: flex;
-      justify-content: space-between;
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       color: var(--text-muted);
+      text-align: center;
+      line-height: 1.5;
     }
 
-    .meter-track {
-      width: 100%;
-      height: 8px;
-      background-color: #1f293d;
-      border-radius: 9999px;
-      overflow: hidden;
-      border: 1px solid var(--border-color);
+    .transcript-panel {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-color);
     }
 
-    .meter-fill {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #10b981 0%, #38bdf8 65%, #ef4444 100%);
-      transition: width 0.08s ease-out;
-      border-radius: 9999px;
-    }
-
-    .canvas-wrapper {
-      margin-top: 1rem;
-      width: 100%;
-      height: 120px;
-      background-color: #0d131f;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      overflow: hidden;
-    }
-
-    canvas {
-      display: block;
-      width: 100%;
-      height: 100%;
-    }
-
-    /* Console Terminal */
-    .terminal-header {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
+    .transcript-panel h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
+      color: var(--text-muted);
       margin-bottom: 0.75rem;
     }
 
-    .terminal-title {
-      font-size: 0.95rem;
-      font-weight: 600;
+    .transcript-interim {
+      font-size: 0.9375rem;
       color: var(--text-muted);
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
+      font-style: italic;
+      min-height: 1.5rem;
+      margin-bottom: 0.75rem;
+      display: none;
     }
 
-    .terminal-instructions {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-    }
-
-    .console-log-box {
-      font-family: var(--font-mono);
-      font-size: 0.85rem;
-      background-color: #050811;
-      border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 1rem;
-      height: 260px;
+    .transcript-finals {
+      max-height: 200px;
       overflow-y: auto;
       display: flex;
       flex-direction: column;
-      gap: 0.35rem;
+      gap: 0.5rem;
     }
 
-    .log-line {
-      display: flex;
-      word-break: break-all;
-      line-height: 1.4;
-    }
-
-    .log-timestamp {
-      color: #64748b;
-      margin-right: 0.5rem;
-      flex-shrink: 0;
-    }
-
-    .log-info .log-content { color: #cbd5e1; }
-    .log-stream .log-content { color: #34d399; font-weight: 600; }
-    .log-chunk .log-content { color: #fbbf24; }
-    .log-server .log-content { color: #38bdf8; }
-    .log-warn .log-content { color: #f97316; }
-    .log-error .log-content { color: #f87171; font-weight: 600; }
-
-    .transcript-box {
-      margin-top: 0.75rem;
-      background-color: var(--bg-surface-elevated);
+    .transcript-entry {
+      background-color: #0f172a;
       border: 1px solid var(--border-color);
-      border-radius: 8px;
-      padding: 1.25rem;
-      min-height: 72px;
-      display: flex;
-      align-items: center;
-      font-size: 1.1rem;
-      line-height: 1.6;
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.9375rem;
+      line-height: 1.5;
     }
 
-    .transcript-placeholder {
+    .assistant-panel {
+      margin-top: 1.5rem;
+      padding-top: 1.5rem;
+      border-top: 1px solid var(--border-color);
+    }
+
+    .assistant-panel h2 {
+      font-size: 0.875rem;
+      font-weight: 600;
       color: var(--text-muted);
-      font-style: italic;
+      margin-bottom: 0.75rem;
     }
 
-    .transcript-active {
+    .assistant-streaming {
+      background-color: #0f172a;
+      border: 1px solid var(--primary);
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.9375rem;
+      line-height: 1.5;
+      min-height: 2.5rem;
       color: var(--text-main);
-      font-weight: 500;
+      display: none;
     }
 
-    .transcript-loading {
-      color: var(--accent-amber);
-      font-style: italic;
+    .assistant-finals {
+      max-height: 200px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
     }
 
-    footer {
-      text-align: center;
-      font-size: 0.825rem;
-      color: #64748b;
-      margin-top: 1rem;
-    }
-
-    footer code {
-      background-color: var(--bg-surface);
-      padding: 0.2rem 0.4rem;
-      border-radius: 4px;
+    .assistant-entry {
+      background-color: #0f172a;
       border: 1px solid var(--border-color);
+      border-left: 3px solid var(--primary);
+      border-radius: 0.5rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.9375rem;
+      line-height: 1.5;
     }
   </style>
 </head>
 <body>
-  <div class="container">
-    <header role="banner">
-      <div>
-        <h1 class="brand-title">
-          <span>🎙️</span> Microphone Stream Console
-        </h1>
-        <p class="brand-subtitle">Captures user microphone audio from HTML and streams real-time data</p>
-      </div>
-      <div class="header-badges">
-        <div class="badge" aria-label="Microphone stream status">
-          <span id="status-indicator" class="indicator inactive"></span>
-          <span id="status-text">Idle (Microphone Off)</span>
-        </div>
-        <div class="badge" aria-label="Server WebSocket status">
-          <span id="ws-indicator" class="indicator connecting"></span>
-          <span id="ws-status-text">Connecting WebSocket...</span>
-        </div>
-      </div>
+  <main class="container" role="region" aria-label="Voice Stream Controls">
+    <header>
+      <h1>🎙️ Voice Input Stream</h1>
+      <div id="status-badge" class="badge" aria-live="polite">Offline</div>
     </header>
 
-    <main role="main">
-      <!-- Controls & Stream Status Card -->
-      <section class="card" aria-labelledby="controls-heading">
-        <h2 id="controls-heading" class="card-title">Microphone Stream Controls</h2>
-        
-        <div class="controls-row">
-          <button id="start-btn" class="btn-primary" aria-label="Start recording microphone audio">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <path d="M12 14c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3S9 3.34 9 5v6c0 1.66 1.34 3 3 3z"/>
-              <path d="M17 11c0 2.76-2.24 5-5 5s-5-2.24-5-5H5c0 3.53 2.61 6.43 6 6.92V21h2v-3.08c3.39-.49 6-3.39 6-6.92h-2z"/>
-            </svg>
-            Start Microphone
-          </button>
+    <div class="form-group">
+      <label for="select-device">Microphone Input</label>
+      <select id="select-device" aria-label="Select audio input device">
+        <option value="">Default Microphone</option>
+      </select>
+    </div>
 
-          <button id="stop-btn" class="btn-danger" disabled aria-label="Stop recording microphone audio">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-              <rect x="6" y="6" width="12" height="12" rx="2" />
-            </svg>
-            Stop Microphone
-          </button>
+    <div class="volume-container">
+      <label id="volume-label" for="volume-bar">Microphone Level</label>
+      <div class="volume-bar-bg" role="progressbar" aria-labelledby="volume-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+        <div id="volume-bar" class="volume-bar"></div>
+      </div>
+    </div>
 
-          <button id="clear-log-btn" class="btn-secondary" aria-label="Clear on-screen console output">
-            Clear Logs
-          </button>
+    <button id="btn-toggle" class="btn-main" type="button" aria-live="assertive">
+      Start Voice Stream
+    </button>
 
-          <select id="language-select" class="select-lang" aria-label="Speech Recognition Language">
-            <option value="gu-IN" selected>🇮🇳 ગુજરાતી (Gujarati)</option>
-            <option value="hi-IN">🇮🇳 हिन्दी (Hindi)</option>
-            <option value="en-IN">🇮🇳 English (India)</option>
-            <option value="en-US">🇺🇸 English (US)</option>
-          </select>
-        </div>
+    <div class="stats-grid" aria-label="Streaming Statistics">
+      <div class="stat-card">
+        <div class="stat-label">Duration</div>
+        <div id="stat-duration" class="stat-value">0.0s</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Chunks Sent</div>
+        <div id="stat-chunks" class="stat-value">0</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">Streamed</div>
+        <div id="stat-bytes" class="stat-value">0.0 KB</div>
+      </div>
+    </div>
 
-        <div id="stream-stats" class="stream-stats-panel" aria-live="polite">
-          <span class="stat-badge">Microphone inactive. Click "Start Microphone" to request permission.</span>
-        </div>
+    <section class="transcript-panel" aria-label="Speech Transcription">
+      <h2>Transcription</h2>
+      <div id="transcript-interim" class="transcript-interim" aria-live="polite"></div>
+      <div id="transcript-finals" class="transcript-finals" aria-live="polite"></div>
+    </section>
 
-        <!-- Volume Meter -->
-        <div class="meter-container">
-          <div class="meter-header">
-            <span>Input Volume Level</span>
-            <span id="volume-label" aria-hidden="true">0%</span>
-          </div>
-          <div class="meter-track" role="meter" aria-label="Microphone input volume level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-            <div id="volume-fill" class="meter-fill"></div>
-          </div>
-        </div>
+    <section class="assistant-panel" aria-label="Assistant Response">
+      <h2>Assistant</h2>
+      <div id="assistant-streaming" class="assistant-streaming" aria-live="polite"></div>
+      <div id="assistant-finals" class="assistant-finals" aria-live="polite"></div>
+    </section>
 
-        <!-- Canvas Visualizer -->
-        <div class="canvas-wrapper">
-          <canvas id="visualizer-canvas" role="img" aria-label="Real-time frequency waveform audio visualizer"></canvas>
-        </div>
-      </section>
+    <p class="spec-info">
+      Audio Stream Format: <strong>16,000 Hz &bull; 16-bit Linear PCM &bull; Mono</strong><br>
+      Sarvam STT &rarr; Gemini LLM streamed response via WebSocket.
+    </p>
+  </main>
 
-      <!-- Browser Speech Analysis Card -->
-      <section class="card" aria-labelledby="transcript-heading" style="margin-top: 1.5rem;">
-        <div class="terminal-header">
-          <h2 id="transcript-heading" class="terminal-title">
-            <span>🗣️</span> Live Browser Speech Analysis (Web Speech API)
-          </h2>
-          <span id="speech-mode-badge" class="badge">Web Speech API</span>
-        </div>
-        <div id="transcript-box" class="transcript-box" role="region" aria-live="polite">
-          <p class="transcript-placeholder">Click &quot;Start Microphone&quot;, speak, and the browser API will analyze speech in real-time and send it to the backend.</p>
-        </div>
-      </section>
-
-      <!-- Live Console Logs Card -->
-      <section class="card" aria-labelledby="console-heading" style="margin-top: 1.5rem;">
-        <div class="terminal-header">
-          <h2 id="console-heading" class="terminal-title">
-            <span>💻</span> Live Console Stream Output
-          </h2>
-          <span class="terminal-instructions">Also visible in your browser DevTools (<code>F12</code> &rarr; Console)</span>
-        </div>
-
-        <div id="log-container" class="console-log-box" role="log" aria-live="polite" aria-atomic="false">
-          <!-- Real-time log entries inserted here -->
-        </div>
-      </section>
-    </main>
-
-    <footer>
-      <p>Voice Stream Server &bull; Run <code>bun run index.ts</code> to start Bun server &bull; Inspect DevTools console for rich objects</p>
-    </footer>
-  </div>
-
-  <script type="module" src="/client.js"></script>
+  <script type="module" src="/app.js"></script>
 </body>
 </html>
