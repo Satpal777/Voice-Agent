@@ -1,4 +1,4 @@
-import type { ServerWsMessage } from "../types/audio.ts";
+import type { BargeInReason, ConversationState, ServerWsMessage } from "../types/audio.ts";
 import type { TranscriptResult } from "./sarvam-stt-bridge.ts";
 import type { VoiceServer } from "./voice-server.ts";
 
@@ -16,6 +16,30 @@ export class SessionMessenger {
       text: result.text,
       language: result.language,
     });
+  }
+
+  public conversationState(
+    sessionId: string,
+    state: ConversationState,
+    turnId?: string
+  ): void {
+    this.send({ type: "conversation_state", sessionId, state, turnId });
+  }
+
+  public turnInterrupted(
+    sessionId: string,
+    turnId: string,
+    reason: BargeInReason
+  ): void {
+    this.send({ type: "turn_interrupted", sessionId, turnId, reason });
+  }
+
+  public turnCancelled(
+    sessionId: string,
+    turnId: string,
+    reason: "superseded" | "session_end"
+  ): void {
+    this.send({ type: "turn_cancelled", sessionId, turnId, reason });
   }
 
   public llmGenerating(sessionId: string, turnId: string): void {
@@ -43,6 +67,8 @@ export class SessionMessenger {
       language: string;
       audioBase64: string;
       mimeType: "audio/wav";
+      sentenceIndex?: number;
+      sentenceCount?: number;
     }
   ): void {
     this.send({

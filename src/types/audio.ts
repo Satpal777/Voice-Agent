@@ -34,10 +34,24 @@ export interface VoiceSession {
   metadata?: Record<string, unknown>;
 }
 
+export type ConversationState = "listening" | "processing" | "speaking";
+
+export type BargeInReason = "vad" | "stt_partial" | "manual";
+
 export interface ClientWsMessage {
-  type: "start_stream" | "stop_stream" | "ping";
+  type:
+    | "start_stream"
+    | "stop_stream"
+    | "ping"
+    | "user_speech_start"
+    | "interrupt_turn"
+    | "assistant_playback_end";
   format?: Partial<AudioFormat>;
   metadata?: Record<string, unknown>;
+  turnId?: string;
+  reason?: BargeInReason;
+  spokenFraction?: number;
+  transcriptText?: string;
 }
 
 export interface ServerWsMessage {
@@ -51,7 +65,10 @@ export interface ServerWsMessage {
     | "llm_final"
     | "tts_audio"
     | "error"
-    | "pong";
+    | "pong"
+    | "conversation_state"
+    | "turn_interrupted"
+    | "turn_cancelled";
   sessionId?: string;
   message?: string;
   text?: string;
@@ -59,6 +76,8 @@ export interface ServerWsMessage {
   turnId?: string;
   audioBase64?: string;
   mimeType?: "audio/wav";
+  state?: ConversationState;
+  reason?: BargeInReason | "superseded" | "session_end";
   stats?: {
     totalChunks: number;
     totalBytes: number;

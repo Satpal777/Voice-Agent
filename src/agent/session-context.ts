@@ -11,6 +11,8 @@ export interface SessionContext {
   lastAssistantReply?: string;
 }
 
+const INTERRUPTED_PREFIX = "[interrupted] ";
+
 export class SessionContextManager {
   private readonly sessions = new Map<string, SessionContext>();
 
@@ -69,7 +71,57 @@ export class SessionContextManager {
     ];
   }
 
+  /**
+   * Record an interrupted assistant reply so the model retains conversational context.
+   */
+  public appendInterruptedTurn(
+    sessionId: string,
+    userText: string,
+    assistantPartial: string,
+    spokenFraction?: number
+  ): void {
+    const partial = estimatePartialSpeechText(assistantPartial, spokenFraction);
+    const interruptedReply = `${INTERRUPTED_PREFIX}${partial}`;
+    this.appendTurn(sessionId, userText, interruptedReply);
+  }
+
   public clear(sessionId: string): void {
     this.sessions.delete(sessionId);
   }
+}
+
+/**
+ * Estimate how much of the assistant reply was spoken before interruption.
+ */
+export function estimatePartialSpeechText(fullText: string, spokenFraction?: number): string {
+  const trimmed = fullText.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+
+  if (spokenFraction === undefined || spokenFraction >= 0.95) {
+    return trimmed;
+  }
+
+  if (spokenFraction <= 0.05) {
+    return trimmed;
+  }
+
+  const targetLength = Math.max(1, Math.floor(trimmed.length * spokenFraction));
+  const slice = trimmed.slice(0, targetLength).trim();
+
+  const lastSpace = slice.lastIndexOf(" ");
+  if (lastSpace > targetLength * 0.5) {
+    return slice.slice(0, lastSpace).trim() || slice;
+  }
+
+  return slice || trimmed;
+}
+
+export function normalizeForEchoCompare(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]/gu, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }

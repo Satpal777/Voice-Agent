@@ -19,6 +19,7 @@
       --color-connecting: #eab308;
       --color-connected: #10b981;
       --color-recording: #ef4444;
+      --color-primary: #3b82f6;
     }
 
     * {
@@ -56,6 +57,14 @@
       margin-bottom: 1.5rem;
       padding-bottom: 1rem;
       border-bottom: 1px solid var(--border-color);
+      flex-wrap: wrap;
+      gap: 0.5rem;
+    }
+
+    .header-badges {
+      display: flex;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
 
     h1 {
@@ -73,7 +82,25 @@
       border-radius: 9999px;
       background-color: var(--color-disconnected);
       color: #ffffff;
-      transition: background-color 0.2s ease;
+      transition: background-color 0.2s ease, box-shadow 0.2s ease;
+    }
+
+    .badge.speaking {
+      animation: speakingPulse 1.4s ease-in-out infinite;
+    }
+
+    @keyframes speakingPulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45); }
+      50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
+    }
+
+    .badge.thinking {
+      animation: thinkingPulse 1s ease-in-out infinite alternate;
+    }
+
+    @keyframes thinkingPulse {
+      from { opacity: 0.75; }
+      to { opacity: 1; }
     }
 
     .form-group {
@@ -229,6 +256,11 @@
       display: none;
     }
 
+    .transcript-interim.backchannel {
+      color: #64748b;
+      opacity: 0.85;
+    }
+
     .transcript-finals {
       max-height: 200px;
       overflow-y: auto;
@@ -294,8 +326,11 @@
 <body>
   <main class="container" role="region" aria-label="Voice Stream Controls">
     <header>
-      <h1>🎙️ Voice Input Stream</h1>
-      <div id="status-badge" class="badge" aria-live="polite">Offline</div>
+      <h1>🎙️ Voice Assistant</h1>
+      <div class="header-badges">
+        <div id="conversation-badge" class="badge" aria-live="polite">Listening</div>
+        <div id="status-badge" class="badge" aria-live="polite">Offline</div>
+      </div>
     </header>
 
     <div class="form-group">
@@ -345,7 +380,7 @@
 
     <p class="spec-info">
       Audio Stream Format: <strong>16,000 Hz &bull; 16-bit Linear PCM &bull; Mono</strong><br>
-      Sarvam STT &rarr; Gemini LLM streamed response via WebSocket.
+      Sarvam STT &rarr; Gemini LLM &rarr; Sarvam TTS with barge-in support.
     </p>
   </main>
 

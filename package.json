@@ -6,7 +6,8 @@
     "start": "bun run index.ts",
     "dev": "bun --watch index.ts",
     "build": "bun build src/client/app.ts --outdir public --target browser",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "bun test src/conversation/interruption-classifier.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

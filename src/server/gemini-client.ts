@@ -53,6 +53,7 @@ export interface GeminiStreamHandlers {
   onGenerating?: () => void;
   onDone: (result: GeminiStreamResult) => void;
   onError: (error: Error) => void;
+  signal?: AbortSignal;
 }
 
 function isRetryableError(error: Error): boolean {
@@ -91,6 +92,10 @@ async function streamOnce(
   const { historyText, apiText } = buildVoiceUserMessage(turn);
   const model = createModel(modelToUse, turn.languageCode);
 
+  if (handlers.signal?.aborted) {
+    throw new DOMException("Turn aborted", "AbortError");
+  }
+
   handlers.onGenerating?.();
 
   const chat = model.startChat({ history: context.geminiHistory });
@@ -100,11 +105,19 @@ async function streamOnce(
   let chunkCount = 0;
 
   for await (const chunk of result.stream) {
+    if (handlers.signal?.aborted) {
+      throw new DOMException("Turn aborted", "AbortError");
+    }
+
     const text = chunk.text();
     if (text) {
       fullText += text;
       chunkCount += 1;
     }
+  }
+
+  if (handlers.signal?.aborted) {
+    throw new DOMException("Turn aborted", "AbortError");
   }
 
   if (!fullText.trim()) {

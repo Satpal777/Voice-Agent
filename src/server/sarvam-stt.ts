@@ -6,7 +6,7 @@ const apiKey = process.env.SARVAM_API_KEY || "";
 const client = apiKey ? new SarvamAIClient({ apiSubscriptionKey: apiKey }) : null;
 
 const languageCode = (process.env.SARVAM_LANGUAGE_CODE ?? "auto") as SarvamAI.SpeechToTextRealtimeStreamingLanguageCode;
-const silenceDurationMs = String(Number(process.env.SARVAM_SILENCE_MS) || 500);
+const silenceDurationMs = String(Number(process.env.SARVAM_SILENCE_MS) || 350);
 
 export type SarvamSttMode = "realtime" | "batch";
 export type SarvamOutputMode = "transcribe" | "translate";
@@ -16,7 +16,21 @@ export const SARVAM_TRANSCRIBING_PLACEHOLDER_PREFIX = "Transcribing ";
 
 export function getSarvamSttMode(): SarvamSttMode {
   const mode = process.env.SARVAM_STT_MODE?.toLowerCase();
-  return mode === "realtime" ? "realtime" : "batch";
+
+  if (mode === "realtime") {
+    return "realtime";
+  }
+
+  if (mode === "batch") {
+    return "batch";
+  }
+
+  // auto (default): prefer realtime when Sarvam is configured
+  if (mode === "auto" || !mode) {
+    return isSarvamConfigured() ? "realtime" : "batch";
+  }
+
+  return "batch";
 }
 
 export function getSarvamSttModeLabel(mode: SarvamSttMode = getSarvamSttMode()): string {

@@ -55,7 +55,7 @@ export class SarvamBatchSttBridge {
       },
       {
         sampleRate,
-        silenceDurationMs: Number(process.env.SARVAM_SILENCE_MS) || 500,
+        silenceDurationMs: Number(process.env.SARVAM_SILENCE_MS) || 350,
       }
     );
 

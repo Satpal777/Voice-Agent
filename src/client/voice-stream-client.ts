@@ -125,6 +125,15 @@ export class VoiceStreamClient {
   }
 
   /**
+   * Send a JSON control message to the backend.
+   */
+  public sendControl(message: ClientWsMessage): void {
+    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+      this.ws.send(JSON.stringify(message));
+    }
+  }
+
+  /**
    * Send control message to stop the current voice stream.
    */
   public stopStream(): void {

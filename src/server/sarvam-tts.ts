@@ -33,10 +33,15 @@ export function getTtsConfig(): { model: string; speaker: string; sampleRate: nu
  * Convert validated speech text to audio via Sarvam TTS REST API.
  */
 export async function synthesizeSpeech(
-  input: SynthesizeSpeechInput
+  input: SynthesizeSpeechInput,
+  signal?: AbortSignal
 ): Promise<SynthesizeSpeechResult> {
   if (!client) {
     throw new Error("SARVAM_API_KEY not configured");
+  }
+
+  if (signal?.aborted) {
+    throw new DOMException("TTS aborted", "AbortError");
   }
 
   const startedAt = Date.now();
@@ -48,6 +53,10 @@ export async function synthesizeSpeech(
     model: ttsModel,
     speech_sample_rate: ttsSampleRate as SarvamAI.SpeechSampleRate,
   });
+
+  if (signal?.aborted) {
+    throw new DOMException("TTS aborted", "AbortError");
+  }
 
   const audioBase64 = response.audios[0];
   if (!audioBase64) {

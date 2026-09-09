@@ -40,6 +40,13 @@ export const VOICE_AGENT_STT_HANDLING =
   "If you truly cannot understand, ask one brief clarifying question in the user's language. " +
   "If the user asks for their name and you have not learned it yet in this conversation, say you do not know and ask what to call them.";
 
+export const VOICE_AGENT_INTERRUPTION_HANDLING =
+  "The user may interrupt you while you are speaking. " +
+  "If your previous reply was marked [interrupted], they cut you off. " +
+  "Do not restart the cut-off answer. Briefly acknowledge only if needed, then address their latest request. " +
+  "Short words like okay, yeah, hmm, or uh-huh are acknowledgments, not new questions — you will not see those as a new turn. " +
+  "Keep replies to 1-2 short sentences when the user is interrupting or steering the conversation.";
+
 export const VOICE_AGENT_OUTPUT_FORMAT =
   "You MUST respond with JSON only (no markdown fences, no extra text). " +
   "Use exactly these fields:\n" +
@@ -65,6 +72,7 @@ export function buildSystemInstruction(languageCode: string): string {
     VOICE_AGENT_BASE_INSTRUCTION,
     VOICE_AGENT_SPEAKING_RULES,
     VOICE_AGENT_STT_HANDLING,
+    VOICE_AGENT_INTERRUPTION_HANDLING,
     VOICE_AGENT_OUTPUT_FORMAT,
     buildLanguageInstruction(languageCode),
   ].join("\n\n");

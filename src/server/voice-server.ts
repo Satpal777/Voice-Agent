@@ -9,6 +9,7 @@ export interface VoiceServerOptions {
   streamManager?: VoiceStreamManager;
   staticDir?: string;
   clientEntry?: string;
+  onControlMessage?: (sessionId: string, message: ClientWsMessage) => void;
 }
 
 interface SocketContext {
@@ -23,6 +24,7 @@ export class VoiceServer {
   public readonly streamManager: VoiceStreamManager;
   private readonly staticDir: string;
   private readonly clientEntry: string;
+  private readonly onControlMessage?: (sessionId: string, message: ClientWsMessage) => void;
   private server?: Server<SocketContext>;
   private readonly clients = new Map<string, ServerWebSocket<SocketContext>>();
 
@@ -31,6 +33,7 @@ export class VoiceServer {
     this.streamManager = options.streamManager ?? new VoiceStreamManager();
     this.staticDir = options.staticDir ?? "public";
     this.clientEntry = options.clientEntry ?? "src/client/app.ts";
+    this.onControlMessage = options.onControlMessage;
   }
 
   /**
@@ -64,6 +67,7 @@ export class VoiceServer {
     const staticDir = this.staticDir;
     const streamManager = this.streamManager;
     const clients = this.clients;
+    const onControlMessage = this.onControlMessage;
 
     this.server = serve<SocketContext>({
       port: this.port,
@@ -138,6 +142,12 @@ export class VoiceServer {
                 ws.send(JSON.stringify(reply));
               } else if (data.type === "ping") {
                 ws.send(JSON.stringify({ type: "pong" } satisfies ServerWsMessage));
+              } else if (
+                data.type === "user_speech_start" ||
+                data.type === "interrupt_turn" ||
+                data.type === "assistant_playback_end"
+              ) {
+                onControlMessage?.(ws.data.sessionId, data);
               }
             } catch {
               ws.send(

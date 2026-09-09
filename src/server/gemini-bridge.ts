@@ -1,5 +1,8 @@
 import { parseAndValidate, sanitizeForTts } from "../agent/output-validator.ts";
-import { SessionContextManager } from "../agent/session-context.ts";
+import {
+  normalizeForEchoCompare,
+  SessionContextManager,
+} from "../agent/session-context.ts";
 import type { VoiceTurn } from "../types/llm.ts";
 import {
   getGeminiModelName,
@@ -9,8 +12,8 @@ import {
 } from "./gemini-client.ts";
 import { log } from "./logger.ts";
 import type { TranscriptResult } from "./sarvam-stt-bridge.ts";
-import type { TtsBridge } from "./tts-bridge.ts";
 import { SARVAM_TRANSCRIBING_PLACEHOLDER_PREFIX } from "./sarvam-stt.ts";
+import type { TtsBridge } from "./tts-bridge.ts";
 
 export type LlmStreamHandler = (
   sessionId: string,
@@ -21,17 +24,22 @@ export type LlmGeneratingHandler = (sessionId: string, turnId: string) => void;
 
 export type LlmErrorHandler = (sessionId: string, error: Error) => void;
 
+interface ActiveTurn {
+  turnId: string;
+  turnNumber: number;
+  userTranscript: string;
+  assistantText?: string;
+  abortController: AbortController;
+  committed: boolean;
+}
+
 /**
- * Sends finalized Sarvam STT results to Gemini, validates output with Zod,
- * then streams validated text and triggers Sarvam TTS.
- * Turns are processed sequentially per session to keep conversation history consistent.
+ * Runs one Gemini turn at a time per session. Conversation history is committed
+ * exactly once: on playback complete, interrupt, or preemption by a new utterance.
  */
 export class GeminiBridge {
   private readonly sessionContexts = new SessionContextManager();
-  private readonly activeTurns = new Map<string, string>();
-  private readonly turnQueues = new Map<string, Promise<void>>();
-  private readonly abortedSessions = new Set<string>();
-  private readonly processingSessions = new Set<string>();
+  private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly onStream: LlmStreamHandler;
   private readonly onGenerating?: LlmGeneratingHandler;
   private readonly onError?: LlmErrorHandler;
@@ -70,16 +78,20 @@ export class GeminiBridge {
       return;
     }
 
-    this.abortedSessions.delete(sessionId);
+    const transcript = result.text.trim();
+    if (this.isEchoOfAssistantSpeech(sessionId, transcript)) {
+      log.debug("Gemini", "Ignored echo transcript", { session: sessionId, text: transcript });
+      return;
+    }
+
+    this.preemptTurn(sessionId, "superseded");
 
     const turnId = crypto.randomUUID().slice(0, 8);
-    this.activeTurns.set(sessionId, turnId);
-
     const languageCode = this.sessionContexts.resolveLanguage(sessionId, result.language);
     const turnNumber = this.sessionContexts.beginTurn(sessionId);
 
     const turn: VoiceTurn = {
-      transcript: result.text.trim(),
+      transcript,
       languageCode,
       turnNumber,
       sessionId,
@@ -89,100 +101,215 @@ export class GeminiBridge {
       timestamp: new Date().toISOString(),
     };
 
-    if (!result.language) {
-      log.warn("Gemini", "STT language missing, using fallback", {
-        session: sessionId,
-        language: languageCode,
-      });
-    }
-
-    if (this.processingSessions.has(sessionId)) {
-      log.info("Gemini", "Turn queued", { session: sessionId, turn: turnNumber });
-    }
-
-    this.enqueueTurn(sessionId, async () => {
-      if (this.abortedSessions.has(sessionId)) {
-        return;
-      }
-
-      const context = this.sessionContexts.getOrCreate(sessionId);
-      this.processingSessions.add(sessionId);
-      const startedAt = Date.now();
-
-      log.info("Gemini", "Processing turn", {
-        session: sessionId,
-        turn: turnNumber,
-        lang: languageCode,
-        input: turn.transcript,
-        model: getGeminiModelName(),
-      });
-
-      try {
-        await streamGeminiResponse(turn, context, {
-          onGenerating: () => {
-            if (this.abortedSessions.has(sessionId)) return;
-            this.onGenerating?.(sessionId, turnId);
-          },
-          onDone: async ({ historyText, fullText }) => {
-            if (this.abortedSessions.has(sessionId)) return;
-
-            const validated = await this.validateWithRepair(turn, context, fullText);
-            if (!validated) {
-              return;
-            }
-
-            const output = sanitizeForTts(validated);
-            this.sessionContexts.appendTurn(sessionId, historyText, output.speechText);
-            this.onStream(sessionId, {
-              text: output.speechText,
-              isFinal: true,
-              turnId,
-              language: output.languageCode,
-            });
-
-            log.info("Gemini", "Turn complete", {
-              session: sessionId,
-              turn: turnNumber,
-              lang: output.languageCode,
-              ms: Date.now() - startedAt,
-              output: output.speechText,
-            });
-
-            await this.ttsBridge?.speak(sessionId, turnId, output);
-          },
-          onError: (error) => {
-            if (!this.abortedSessions.has(sessionId)) {
-              log.error("Gemini", "Turn failed", {
-                session: sessionId,
-                turn: turnNumber,
-                ms: Date.now() - startedAt,
-                error: error.message,
-              });
-              this.onError?.(sessionId, error);
-            }
-          },
-        });
-      } finally {
-        this.processingSessions.delete(sessionId);
-      }
+    const abortController = new AbortController();
+    this.activeTurns.set(sessionId, {
+      turnId,
+      turnNumber,
+      userTranscript: transcript,
+      abortController,
+      committed: false,
     });
+
+    log.info("Gemini", "Processing turn", {
+      session: sessionId,
+      turn: turnNumber,
+      lang: languageCode,
+      input: turn.transcript,
+      model: getGeminiModelName(),
+    });
+
+    void this.runTurn(sessionId, turnId, turn, abortController);
+  }
+
+  /**
+   * Stop the active turn and keep conversation context.
+   * Returns the aborted turn id when something was cancelled.
+   */
+  public preemptTurn(
+    sessionId: string,
+    reason: "superseded" | "interrupted",
+    spokenFraction?: number
+  ): { turnId: string } | undefined {
+    const active = this.activeTurns.get(sessionId);
+    if (!active) {
+      return undefined;
+    }
+
+    this.commitActiveTurn(sessionId, "interrupted", spokenFraction);
+    active.abortController.abort();
+    this.ttsBridge?.cancelTurn(sessionId, active.turnId);
+    this.activeTurns.delete(sessionId);
+    return { turnId: active.turnId };
+  }
+
+  public setAssistantText(sessionId: string, assistantText: string): void {
+    const active = this.activeTurns.get(sessionId);
+    if (active) {
+      active.assistantText = assistantText;
+    }
+  }
+
+  public completeTurn(sessionId: string, turnId: string): void {
+    const active = this.activeTurns.get(sessionId);
+    if (!active || active.turnId !== turnId) {
+      return;
+    }
+
+    this.commitActiveTurn(sessionId, "complete");
+    this.activeTurns.delete(sessionId);
   }
 
   public clearSession(sessionId: string): void {
-    this.abortedSessions.add(sessionId);
+    this.preemptTurn(sessionId, "interrupted");
     this.ttsBridge?.abortSession(sessionId);
     this.sessionContexts.clear(sessionId);
-    this.activeTurns.delete(sessionId);
-    this.processingSessions.delete(sessionId);
-    this.turnQueues.delete(sessionId);
     log.debug("Gemini", "Session cleared", { session: sessionId });
+  }
+
+  private commitActiveTurn(
+    sessionId: string,
+    mode: "complete" | "interrupted",
+    spokenFraction?: number
+  ): void {
+    const active = this.activeTurns.get(sessionId);
+    if (!active || active.committed) {
+      return;
+    }
+
+    active.committed = true;
+
+    if (mode === "interrupted") {
+      this.sessionContexts.appendInterruptedTurn(
+        sessionId,
+        active.userTranscript,
+        active.assistantText ?? "",
+        spokenFraction
+      );
+      return;
+    }
+
+    if (active.assistantText) {
+      this.sessionContexts.appendTurn(sessionId, active.userTranscript, active.assistantText);
+    }
+  }
+
+  private isEchoOfAssistantSpeech(sessionId: string, transcript: string): boolean {
+    const session = this.sessionContexts.getOrCreate(sessionId);
+    const lastReply = session.lastAssistantReply;
+    if (!lastReply) {
+      return false;
+    }
+
+    const normalizedTranscript = normalizeForEchoCompare(transcript);
+    const normalizedReply = normalizeForEchoCompare(
+      lastReply.replace(/^\[interrupted\]\s*/i, "")
+    );
+
+    if (normalizedTranscript.length < 12) {
+      return false;
+    }
+
+    const transcriptWords = normalizedTranscript.split(" ").filter(Boolean);
+    if (transcriptWords.length < 4) {
+      return false;
+    }
+
+    return (
+      normalizedReply.includes(normalizedTranscript) ||
+      (normalizedTranscript.includes(normalizedReply) && normalizedReply.length >= 12)
+    );
+  }
+
+  private async runTurn(
+    sessionId: string,
+    turnId: string,
+    turn: VoiceTurn,
+    abortController: AbortController
+  ): Promise<void> {
+    const context = this.sessionContexts.getOrCreate(sessionId);
+    const startedAt = Date.now();
+
+    try {
+      await streamGeminiResponse(turn, context, {
+        signal: abortController.signal,
+        onGenerating: () => {
+          if (abortController.signal.aborted) return;
+          this.onGenerating?.(sessionId, turnId);
+        },
+        onDone: async ({ fullText }) => {
+          if (abortController.signal.aborted) return;
+
+          const validated = await this.validateWithRepair(turn, context, fullText, abortController.signal);
+          if (!validated || abortController.signal.aborted) {
+            return;
+          }
+
+          const output = sanitizeForTts(validated);
+          const active = this.activeTurns.get(sessionId);
+          if (!active || active.turnId !== turnId) {
+            return;
+          }
+
+          active.assistantText = output.speechText;
+          this.onStream(sessionId, {
+            text: output.speechText,
+            isFinal: true,
+            turnId,
+            language: output.languageCode,
+          });
+
+          log.info("Gemini", "Turn complete", {
+            session: sessionId,
+            turn: turn.turnNumber,
+            lang: output.languageCode,
+            ms: Date.now() - startedAt,
+            output: output.speechText,
+          });
+
+          await this.ttsBridge?.speak(sessionId, turnId, output);
+
+          if (!this.ttsBridge && this.activeTurns.get(sessionId)?.turnId === turnId) {
+            this.completeTurn(sessionId, turnId);
+          }
+        },
+        onError: (error) => {
+          if (error.name === "AbortError" || abortController.signal.aborted) {
+            return;
+          }
+
+          log.error("Gemini", "Turn failed", {
+            session: sessionId,
+            turn: turn.turnNumber,
+            ms: Date.now() - startedAt,
+            error: error.message,
+          });
+          this.onError?.(sessionId, error);
+          if (this.activeTurns.get(sessionId)?.turnId === turnId) {
+            this.activeTurns.delete(sessionId);
+          }
+        },
+      });
+    } catch (err: unknown) {
+      const error = err instanceof Error ? err : new Error(String(err));
+      if (error.name !== "AbortError" && !abortController.signal.aborted) {
+        this.onError?.(sessionId, error);
+      }
+      if (this.activeTurns.get(sessionId)?.turnId === turnId) {
+        this.activeTurns.delete(sessionId);
+      }
+    }
   }
 
   private async validateWithRepair(
     turn: VoiceTurn,
     context: ReturnType<SessionContextManager["getOrCreate"]>,
-    raw: string
+    raw: string,
+    signal?: AbortSignal
   ) {
+    if (signal?.aborted) {
+      return null;
+    }
+
     let result = parseAndValidate(raw);
 
     if (!result.success) {
@@ -199,6 +326,9 @@ export class GeminiBridge {
           raw,
           result.errors
         );
+        if (signal?.aborted) {
+          return null;
+        }
         result = parseAndValidate(repaired);
       } catch (err: unknown) {
         const error = err instanceof Error ? err : new Error(String(err));
@@ -219,13 +349,5 @@ export class GeminiBridge {
     }
 
     return result.data;
-  }
-
-  private enqueueTurn(sessionId: string, job: () => Promise<void>): void {
-    const previous = this.turnQueues.get(sessionId) ?? Promise.resolve();
-    const next = previous
-      .catch(() => {})
-      .then(() => job());
-    this.turnQueues.set(sessionId, next);
   }
 }

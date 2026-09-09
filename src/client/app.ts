@@ -1,24 +1,27 @@
 import { MicrophoneCapture } from "./microphone-capture.ts";
 import { VoiceStreamClient, type ConnectionState } from "./voice-stream-client.ts";
 import { AudioPlayer } from "./audio-player.ts";
+import { ConversationController } from "./conversation-controller.ts";
+import type { ConversationState, ServerWsMessage } from "../types/audio.ts";
 
 /**
  * Controller class coordinating microphone capture, streaming transport, and UI.
  */
 export class VoiceAssistantApp {
-  private readonly mic = new MicrophoneCapture({ sampleRate: 16000, bufferSize: 2048 });
+  private readonly mic = new MicrophoneCapture({ sampleRate: 16000, bufferSize: 1024 });
   private readonly client = new VoiceStreamClient();
   private readonly audioPlayer = new AudioPlayer();
+  private readonly conversation: ConversationController;
 
   private chunksSent = 0;
   private bytesSent = 0;
   private streamStartTime = 0;
   private timerInterval?: number;
 
-  // UI Element references
   private btnToggle!: HTMLButtonElement;
   private selectDevice!: HTMLSelectElement;
   private statusBadge!: HTMLElement;
+  private conversationBadge!: HTMLElement;
   private statChunks!: HTMLElement;
   private statBytes!: HTMLElement;
   private statDuration!: HTMLElement;
@@ -27,7 +30,48 @@ export class VoiceAssistantApp {
   private transcriptFinals!: HTMLElement;
   private assistantStreaming!: HTMLElement;
   private assistantFinals!: HTMLElement;
-  private currentAssistantTurnId?: string;
+
+  constructor() {
+    this.conversation = new ConversationController(this.client, this.audioPlayer, {
+      onConversationState: (state, turnId) => this.updateConversationBadge(state, turnId),
+      onTranscriptPartial: (text, isBackchannelAck) => {
+        this.transcriptInterim.textContent = isBackchannelAck ? `${text} (listening…)` : text;
+        this.transcriptInterim.classList.toggle("backchannel", Boolean(isBackchannelAck));
+        this.transcriptInterim.style.display = "block";
+      },
+      onTranscriptFinal: (text, language) => {
+        this.transcriptInterim.textContent = "";
+        this.transcriptInterim.classList.remove("backchannel");
+        this.transcriptInterim.style.display = "none";
+
+        const entry = document.createElement("div");
+        entry.className = "transcript-entry";
+        const lang = language ? ` [${language}]` : "";
+        entry.textContent = `${text}${lang}`;
+        this.transcriptFinals.appendChild(entry);
+        this.transcriptFinals.scrollTop = this.transcriptFinals.scrollHeight;
+      },
+      onAssistantGenerating: () => {
+        this.assistantStreaming.textContent = "Thinking...";
+        this.assistantStreaming.style.display = "block";
+      },
+      onAssistantFinal: (text, language) => {
+        this.assistantStreaming.textContent = "";
+        this.assistantStreaming.style.display = "none";
+
+        const entry = document.createElement("div");
+        entry.className = "assistant-entry";
+        const lang = language ? ` [${language}]` : "";
+        entry.textContent = `${text}${lang}`;
+        this.assistantFinals.appendChild(entry);
+        this.assistantFinals.scrollTop = this.assistantFinals.scrollHeight;
+      },
+      onTurnInterrupted: () => {
+        this.assistantStreaming.textContent = "";
+        this.assistantStreaming.style.display = "none";
+      },
+    });
+  }
 
   public async initialize(): Promise<void> {
     this.bindElements();
@@ -45,6 +89,7 @@ export class VoiceAssistantApp {
     this.btnToggle = document.getElementById("btn-toggle") as HTMLButtonElement;
     this.selectDevice = document.getElementById("select-device") as HTMLSelectElement;
     this.statusBadge = document.getElementById("status-badge") as HTMLElement;
+    this.conversationBadge = document.getElementById("conversation-badge") as HTMLElement;
     this.statChunks = document.getElementById("stat-chunks") as HTMLElement;
     this.statBytes = document.getElementById("stat-bytes") as HTMLElement;
     this.statDuration = document.getElementById("stat-duration") as HTMLElement;
@@ -56,7 +101,6 @@ export class VoiceAssistantApp {
   }
 
   private setupListeners(): void {
-    // 1. Microphone callbacks
     this.mic.onChunk((pcmChunk) => {
       this.chunksSent++;
       this.bytesSent += pcmChunk.byteLength;
@@ -67,6 +111,7 @@ export class VoiceAssistantApp {
     this.mic.onVolume((rms) => {
       const percentage = Math.min(100, Math.round(rms * 100));
       this.volumeBar.style.width = `${percentage}%`;
+      this.conversation.handleVolume(rms);
     });
 
     this.mic.onError((error) => {
@@ -75,50 +120,24 @@ export class VoiceAssistantApp {
       this.stop();
     });
 
-    // 2. Client connection callbacks
     this.client.onStateChange((state: ConnectionState) => {
       this.updateConnectionBadge(state);
     });
 
-    this.client.onMessage((msg) => {
+    this.client.onMessage((msg: ServerWsMessage) => {
       if (msg.type === "session_created") {
         console.log(`[VoiceStreamClient] Session created: ${msg.sessionId}`);
-      } else if (msg.type === "transcript_partial" && msg.text) {
-        this.transcriptInterim.textContent = msg.text;
-        this.transcriptInterim.style.display = "block";
-      } else if (msg.type === "transcript_final" && msg.text) {
-        this.transcriptInterim.textContent = "";
-        this.transcriptInterim.style.display = "none";
-
-        const entry = document.createElement("div");
-        entry.className = "transcript-entry";
-        const lang = msg.language ? ` [${msg.language}]` : "";
-        entry.textContent = `${msg.text}${lang}`;
-        this.transcriptFinals.appendChild(entry);
-        this.transcriptFinals.scrollTop = this.transcriptFinals.scrollHeight;
-      } else if (msg.type === "llm_generating") {
-        this.currentAssistantTurnId = msg.turnId;
-        this.assistantStreaming.textContent = "Generating...";
-        this.assistantStreaming.style.display = "block";
-      } else if (msg.type === "llm_final" && msg.text) {
-        this.assistantStreaming.textContent = "";
-        this.assistantStreaming.style.display = "none";
-        this.currentAssistantTurnId = undefined;
-
-        const entry = document.createElement("div");
-        entry.className = "assistant-entry";
-        const lang = msg.language ? ` [${msg.language}]` : "";
-        entry.textContent = `${msg.text}${lang}`;
-        this.assistantFinals.appendChild(entry);
-        this.assistantFinals.scrollTop = this.assistantFinals.scrollHeight;
-      } else if (msg.type === "tts_audio" && msg.audioBase64 && msg.turnId) {
-        this.audioPlayer.enqueue(msg.turnId, msg.audioBase64, msg.mimeType ?? "audio/wav");
-      } else if (msg.type === "error" && msg.message) {
-        console.error("[STT Error]", msg.message);
+        return;
       }
+
+      if (msg.type === "error" && msg.message) {
+        console.error("[Server Error]", msg.message);
+        return;
+      }
+
+      this.conversation.handleServerMessage(msg);
     });
 
-    // 3. User UI button
     this.btnToggle.addEventListener("click", () => {
       if (this.mic.capturing) {
         this.stop();
@@ -149,7 +168,6 @@ export class VoiceAssistantApp {
 
       const selectedDeviceId = this.selectDevice.value || undefined;
 
-      // Start stream session on the server before mic captures audio
       this.client.startStream(
         { sampleRate: 16000, channels: 1, bitDepth: 16 },
         { device: this.selectDevice.options[this.selectDevice.selectedIndex]?.text }
@@ -162,6 +180,8 @@ export class VoiceAssistantApp {
       this.streamStartTime = Date.now();
       this.startTimer();
       this.clearTranscripts();
+      this.conversation.reset();
+      this.updateConversationBadge("listening");
 
       this.btnToggle.disabled = false;
       this.btnToggle.textContent = "Stop Voice Stream";
@@ -179,6 +199,7 @@ export class VoiceAssistantApp {
     this.mic.stop();
     this.client.stopStream();
     this.audioPlayer.stop();
+    this.conversation.reset();
     this.stopTimer();
 
     this.btnToggle.disabled = false;
@@ -186,6 +207,7 @@ export class VoiceAssistantApp {
     this.btnToggle.classList.remove("recording");
     this.selectDevice.disabled = false;
     this.volumeBar.style.width = "0%";
+    this.updateConversationBadge("listening");
   }
 
   private startTimer(): void {
@@ -216,7 +238,6 @@ export class VoiceAssistantApp {
     this.assistantStreaming.textContent = "";
     this.assistantStreaming.style.display = "none";
     this.assistantFinals.innerHTML = "";
-    this.currentAssistantTurnId = undefined;
   }
 
   private updateConnectionBadge(state: ConnectionState): void {
@@ -231,9 +252,24 @@ export class VoiceAssistantApp {
     this.statusBadge.textContent = info.text;
     this.statusBadge.style.backgroundColor = info.color;
   }
+
+  private updateConversationBadge(state: ConversationState, _turnId?: string): void {
+    const labels: Record<ConversationState, { text: string; color: string; className: string }> = {
+      listening: { text: "Listening", color: "var(--color-connected)", className: "" },
+      processing: { text: "Thinking", color: "var(--color-connecting)", className: "thinking" },
+      speaking: { text: "Speaking", color: "var(--color-primary)", className: "speaking" },
+    };
+
+    const info = labels[state];
+    this.conversationBadge.textContent = info.text;
+    this.conversationBadge.style.backgroundColor = info.color;
+    this.conversationBadge.classList.remove("speaking", "thinking");
+    if (info.className) {
+      this.conversationBadge.classList.add(info.className);
+    }
+  }
 }
 
-// Auto-bootstrap app when DOM is ready
 window.addEventListener("DOMContentLoaded", () => {
   const app = new VoiceAssistantApp();
   app.initialize().catch(console.error);

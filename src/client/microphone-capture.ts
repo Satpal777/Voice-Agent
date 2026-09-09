@@ -3,17 +3,20 @@ export type VolumeHandler = (rms: number) => void;
 export type ErrorHandler = (error: Error) => void;
 
 export interface MicrophoneOptions {
-  sampleRate?: number; // Target sample rate (default: 16000 Hz for STT)
-  bufferSize?: number; // Chunk size in samples (default: 2048)
+  sampleRate?: number;
+  bufferSize?: number;
 }
 
+const WORKLET_URL = "/pcm-capture-processor.js";
+
 /**
- * Class to capture audio from the user microphone and output 16kHz 16-bit PCM chunks.
+ * Captures microphone audio as 16 kHz 16-bit PCM using AudioWorklet (ScriptProcessor fallback).
  */
 export class MicrophoneCapture {
   private mediaStream?: MediaStream;
   private audioContext?: AudioContext;
   private sourceNode?: MediaStreamAudioSourceNode;
+  private workletNode?: AudioWorkletNode;
   private processorNode?: ScriptProcessorNode;
   private isCapturing = false;
 
@@ -26,33 +29,21 @@ export class MicrophoneCapture {
 
   constructor(options: MicrophoneOptions = {}) {
     this.sampleRate = options.sampleRate ?? 16000;
-    this.bufferSize = options.bufferSize ?? 2048;
+    this.bufferSize = options.bufferSize ?? 1024;
   }
 
-  /**
-   * Register handler for converted 16-bit PCM audio chunks.
-   */
   public onChunk(handler: AudioChunkHandler): void {
     this.onChunkCallback = handler;
   }
 
-  /**
-   * Register handler for normalized volume level (0.0 - 1.0).
-   */
   public onVolume(handler: VolumeHandler): void {
     this.onVolumeCallback = handler;
   }
 
-  /**
-   * Register error handler.
-   */
   public onError(handler: ErrorHandler): void {
     this.onErrorCallback = handler;
   }
 
-  /**
-   * List available audio input devices.
-   */
   public static async getAudioInputDevices(): Promise<MediaDeviceInfo[]> {
     try {
       const devices = await navigator.mediaDevices.enumerateDevices();
@@ -62,9 +53,6 @@ export class MicrophoneCapture {
     }
   }
 
-  /**
-   * Start capturing microphone stream.
-   */
   public async start(deviceId?: string): Promise<MediaStream> {
     if (this.isCapturing) {
       throw new Error("Microphone capture is already active");
@@ -84,8 +72,9 @@ export class MicrophoneCapture {
 
       this.mediaStream = await navigator.mediaDevices.getUserMedia(constraints);
 
-      // Create AudioContext at desired target sample rate (16kHz for STT)
-      const AudioCtxClass = window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
+      const AudioCtxClass =
+        window.AudioContext ||
+        (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
       this.audioContext = new AudioCtxClass({ sampleRate: this.sampleRate });
 
       if (this.audioContext.state === "suspended") {
@@ -94,36 +83,10 @@ export class MicrophoneCapture {
 
       this.sourceNode = this.audioContext.createMediaStreamSource(this.mediaStream);
 
-      // ScriptProcessorNode handles PCM conversion
-      this.processorNode = this.audioContext.createScriptProcessor(this.bufferSize, 1, 1);
-
-      this.processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
-        if (!this.isCapturing) return;
-
-        const inputData = event.inputBuffer.getChannelData(0);
-
-        // 1. Calculate RMS volume
-        let sumSquares = 0;
-        for (let i = 0; i < inputData.length; i++) {
-          const sample = inputData[i] ?? 0;
-          sumSquares += sample * sample;
-        }
-        const rms = Math.min(1, Math.sqrt(sumSquares / inputData.length) * 4);
-        this.onVolumeCallback?.(rms);
-
-        // 2. Convert Float32Array [-1.0, 1.0] to Int16Array [-32768, 32767]
-        const pcm16 = new Int16Array(inputData.length);
-        for (let i = 0; i < inputData.length; i++) {
-          const sample = Math.max(-1, Math.min(1, inputData[i] ?? 0));
-          pcm16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
-        }
-
-        // Emit ArrayBuffer chunk
-        this.onChunkCallback?.(pcm16.buffer);
-      };
-
-      this.sourceNode.connect(this.processorNode);
-      this.processorNode.connect(this.audioContext.destination);
+      const workletReady = await this.tryStartWorklet();
+      if (!workletReady) {
+        this.startScriptProcessor();
+      }
 
       this.isCapturing = true;
       return this.mediaStream;
@@ -135,11 +98,14 @@ export class MicrophoneCapture {
     }
   }
 
-  /**
-   * Stop capturing microphone stream and release hardware tracks.
-   */
   public stop(): void {
     this.isCapturing = false;
+
+    if (this.workletNode) {
+      this.workletNode.port.onmessage = null;
+      this.workletNode.disconnect();
+      this.workletNode = undefined;
+    }
 
     if (this.processorNode) {
       this.processorNode.disconnect();
@@ -153,7 +119,7 @@ export class MicrophoneCapture {
     }
 
     if (this.audioContext && this.audioContext.state !== "closed") {
-      this.audioContext.close();
+      void this.audioContext.close();
       this.audioContext = undefined;
     }
 
@@ -169,5 +135,72 @@ export class MicrophoneCapture {
 
   public get capturing(): boolean {
     return this.isCapturing;
+  }
+
+  private async tryStartWorklet(): Promise<boolean> {
+    if (!this.audioContext || !this.sourceNode || !("audioWorklet" in this.audioContext)) {
+      return false;
+    }
+
+    try {
+      await this.audioContext.audioWorklet.addModule(WORKLET_URL);
+      this.workletNode = new AudioWorkletNode(this.audioContext, "pcm-capture-processor");
+
+      this.workletNode.port.onmessage = (event: MessageEvent<{ pcm: ArrayBuffer; rms: number }>) => {
+        if (!this.isCapturing) {
+          return;
+        }
+
+        this.onVolumeCallback?.(event.data.rms);
+        this.onChunkCallback?.(event.data.pcm);
+      };
+
+      this.sourceNode.connect(this.workletNode);
+      const silent = this.audioContext.createGain();
+      silent.gain.value = 0;
+      this.workletNode.connect(silent);
+      silent.connect(this.audioContext.destination);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private startScriptProcessor(): void {
+    if (!this.audioContext || !this.sourceNode) {
+      return;
+    }
+
+    this.processorNode = this.audioContext.createScriptProcessor(this.bufferSize, 1, 1);
+
+    this.processorNode.onaudioprocess = (event: AudioProcessingEvent) => {
+      if (!this.isCapturing) {
+        return;
+      }
+
+      const inputData = event.inputBuffer.getChannelData(0);
+
+      let sumSquares = 0;
+      for (let i = 0; i < inputData.length; i++) {
+        const sample = inputData[i] ?? 0;
+        sumSquares += sample * sample;
+      }
+      const rms = Math.min(1, Math.sqrt(sumSquares / inputData.length) * 4);
+      this.onVolumeCallback?.(rms);
+
+      const pcm16 = new Int16Array(inputData.length);
+      for (let i = 0; i < inputData.length; i++) {
+        const sample = Math.max(-1, Math.min(1, inputData[i] ?? 0));
+        pcm16[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+      }
+
+      this.onChunkCallback?.(pcm16.buffer);
+    };
+
+    this.sourceNode.connect(this.processorNode);
+    const silent = this.audioContext.createGain();
+    silent.gain.value = 0;
+    this.processorNode.connect(silent);
+    silent.connect(this.audioContext.destination);
   }
 }
