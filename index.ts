@@ -2,7 +2,7 @@ import { VoiceStreamManager } from "./src/server/voice-stream-manager.ts";
 import { VoiceServer } from "./src/server/voice-server.ts";
 import { SarvamSttBridge } from "./src/server/sarvam-stt-bridge.ts";
 import { SarvamBatchSttBridge } from "./src/server/sarvam-batch-stt-bridge.ts";
-import { GeminiBridge } from "./src/server/gemini-bridge.ts";
+import { LlmBridge } from "./src/server/llm-bridge.ts";
 import { TtsBridge } from "./src/server/tts-bridge.ts";
 import { SessionMessenger } from "./src/server/session-messenger.ts";
 import { VoiceConversationOrchestrator } from "./src/server/voice-conversation-orchestrator.ts";
@@ -12,7 +12,7 @@ import {
   getSarvamOutputMode,
   isSarvamConfigured,
 } from "./src/server/sarvam-stt.ts";
-import { getGeminiModelName, isGeminiConfigured } from "./src/server/gemini-client.ts";
+import { getLlmModelName, isLlmConfigured } from "./src/server/ollama-client.ts";
 import { getTtsConfig, isSarvamTtsConfigured } from "./src/server/sarvam-tts.ts";
 import { log } from "./src/server/logger.ts";
 import type { ClientWsMessage } from "./src/types/audio.ts";
@@ -23,7 +23,7 @@ const sttMode = getSarvamSttMode();
 const sttModeLabel = isSarvamConfigured() ? getSarvamSttModeLabel(sttMode) : "disabled";
 const sttOutput = getSarvamOutputMode();
 
-let geminiBridge: GeminiBridge | undefined;
+let llmBridge: LlmBridge | undefined;
 let ttsBridge: TtsBridge | undefined;
 let orchestrator: VoiceConversationOrchestrator | undefined;
 let messenger: SessionMessenger | undefined;
@@ -45,7 +45,7 @@ streamManager.onStreamStop((session) => {
     sec: (session.totalDurationMs / 1000).toFixed(1),
   });
   orchestrator?.clearSession(session.id);
-  geminiBridge?.clearSession(session.id);
+  llmBridge?.clearSession(session.id);
   ttsBridge?.clearSession(session.id);
 });
 
@@ -84,8 +84,8 @@ if (isSarvamTtsConfigured()) {
   log.warn("Server", "Sarvam TTS disabled — set SARVAM_API_KEY in .env");
 }
 
-if (isGeminiConfigured()) {
-  geminiBridge = new GeminiBridge(
+if (isLlmConfigured()) {
+  llmBridge = new LlmBridge(
     (sessionId, chunk) => {
       orchestrator?.handleLlmFinal(sessionId, chunk.turnId, chunk.text);
       messenger?.llmFinal(sessionId, chunk);
@@ -104,10 +104,10 @@ if (isGeminiConfigured()) {
     }
   );
 
-  orchestrator = new VoiceConversationOrchestrator(messenger, geminiBridge, ttsBridge);
-  log.info("Server", "Gemini ready", { model: getGeminiModelName() });
+  orchestrator = new VoiceConversationOrchestrator(messenger, llmBridge, ttsBridge);
+  log.info("Server", "Ollama ready", { model: getLlmModelName() });
 } else {
-  log.warn("Server", "Gemini disabled — set GEMINI_API_KEY in .env");
+  log.warn("Server", "LLM disabled — set OLLAMA_API_KEY in .env for cloud, or OLLAMA_HOST for local");
 }
 
 if (isSarvamConfigured()) {
@@ -127,7 +127,7 @@ if (isSarvamConfigured()) {
     if (orchestrator) {
       orchestrator.handleTranscript(sessionId, result);
     } else if (result.isFinal) {
-      geminiBridge?.handleFinalTranscript(sessionId, result);
+      llmBridge?.handleFinalTranscript(sessionId, result);
     }
   };
 

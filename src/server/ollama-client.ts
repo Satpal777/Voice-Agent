@@ -1,57 +1,47 @@
-import { GoogleGenerativeAI, SchemaType, type GenerationConfig, type ResponseSchema } from "@google/generative-ai";
+import { Ollama } from "ollama";
 import { buildRepairPrompt } from "../agent/output-validator.ts";
 import { buildVoiceUserMessage } from "../agent/message-builder.ts";
 import { buildSystemInstruction } from "../agent/voice-agent-instructions.ts";
 import type { SessionContext } from "../agent/session-context.ts";
 import type { VoiceTurn } from "../types/llm.ts";
-import { TTS_LANGUAGE_CODES } from "../types/voice-agent-output.ts";
+import {
+  getOllamaApiKey,
+  getOllamaFallbackModelName,
+  getOllamaHost,
+  getOllamaMaxRetries,
+  getOllamaModelName,
+  isLlmConfigured,
+} from "./llm-config.ts";
 import { log } from "./logger.ts";
 
-const apiKey = process.env.GEMINI_API_KEY || "";
-const modelName = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-const fallbackModel = process.env.GEMINI_FALLBACK_MODEL || "gemini-2.0-flash";
-const maxRetries = Number(process.env.GEMINI_MAX_RETRIES) || 2;
+const modelName = getOllamaModelName();
+const fallbackModel = getOllamaFallbackModelName();
+const maxRetries = getOllamaMaxRetries();
 
-const genAI = apiKey ? new GoogleGenerativeAI(apiKey) : null;
+function createClient(): Ollama | null {
+  if (!isLlmConfigured()) {
+    return null;
+  }
 
-const voiceAgentResponseSchema: ResponseSchema = {
-  type: SchemaType.OBJECT,
-  properties: {
-    speechText: {
-      type: SchemaType.STRING,
-      description: "Speakable reply text for TTS, 1-3 short sentences, no markdown or URLs",
-    },
-    languageCode: {
-      type: SchemaType.STRING,
-      format: "enum",
-      description: "BCP-47 language code matching the reply language",
-      enum: [...TTS_LANGUAGE_CODES],
-    },
-  },
-  required: ["speechText", "languageCode"],
-};
-
-const jsonGenerationConfig: GenerationConfig = {
-  responseMimeType: "application/json",
-  responseSchema: voiceAgentResponseSchema,
-};
-
-export function isGeminiConfigured(): boolean {
-  return Boolean(apiKey && genAI);
+  const apiKey = getOllamaApiKey();
+  return new Ollama({
+    host: getOllamaHost(),
+    headers: apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined,
+  });
 }
 
-export function getGeminiModelName(): string {
-  return modelName;
-}
+const client = createClient();
 
-export interface GeminiStreamResult {
+export { isLlmConfigured, getLlmModelName } from "./llm-config.ts";
+
+export interface LlmStreamResult {
   historyText: string;
   fullText: string;
 }
 
-export interface GeminiStreamHandlers {
+export interface LlmStreamHandlers {
   onGenerating?: () => void;
-  onDone: (result: GeminiStreamResult) => void;
+  onDone: (result: LlmStreamResult) => void;
   onError: (error: Error) => void;
   signal?: AbortSignal;
 }
@@ -63,7 +53,9 @@ function isRetryableError(error: Error): boolean {
     msg.includes("429") ||
     msg.includes("high demand") ||
     msg.includes("unavailable") ||
-    msg.includes("overloaded")
+    msg.includes("overloaded") ||
+    msg.includes("timeout") ||
+    msg.includes("econnreset")
   );
 }
 
@@ -71,26 +63,25 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-function createModel(modelToUse: string, languageCode: string) {
-  if (!genAI) {
-    throw new Error("GEMINI_API_KEY not configured");
-  }
-
-  return genAI.getGenerativeModel({
-    model: modelToUse,
-    systemInstruction: buildSystemInstruction(languageCode),
-    generationConfig: jsonGenerationConfig,
-  });
+function buildMessages(turn: VoiceTurn, context: SessionContext, userContent: string) {
+  return [
+    { role: "system" as const, content: buildSystemInstruction(turn.languageCode) },
+    ...context.chatHistory,
+    { role: "user" as const, content: userContent },
+  ];
 }
 
 async function streamOnce(
   turn: VoiceTurn,
   context: SessionContext,
   modelToUse: string,
-  handlers: GeminiStreamHandlers
+  handlers: LlmStreamHandlers
 ): Promise<void> {
+  if (!client) {
+    throw new Error("OLLAMA_API_KEY not configured for cloud host");
+  }
+
   const { historyText, apiText } = buildVoiceUserMessage(turn);
-  const model = createModel(modelToUse, turn.languageCode);
 
   if (handlers.signal?.aborted) {
     throw new DOMException("Turn aborted", "AbortError");
@@ -98,18 +89,22 @@ async function streamOnce(
 
   handlers.onGenerating?.();
 
-  const chat = model.startChat({ history: context.geminiHistory });
-  const result = await chat.sendMessageStream(apiText);
+  const response = await client.chat({
+    model: modelToUse,
+    messages: buildMessages(turn, context, apiText),
+    stream: true,
+    format: "json",
+  });
 
   let fullText = "";
   let chunkCount = 0;
 
-  for await (const chunk of result.stream) {
+  for await (const part of response) {
     if (handlers.signal?.aborted) {
       throw new DOMException("Turn aborted", "AbortError");
     }
 
-    const text = chunk.text();
+    const text = part.message.content;
     if (text) {
       fullText += text;
       chunkCount += 1;
@@ -121,10 +116,10 @@ async function streamOnce(
   }
 
   if (!fullText.trim()) {
-    throw new Error("Gemini returned an empty response");
+    throw new Error("Ollama returned an empty response");
   }
 
-  log.debug("Gemini", "Stream chunks received", {
+  log.debug("Ollama", "Stream chunks received", {
     session: turn.sessionId,
     turn: turn.turnNumber,
     chunks: chunkCount,
@@ -137,25 +132,31 @@ async function streamOnce(
 /**
  * Request a repaired JSON response after Zod validation failure.
  */
-export async function repairGeminiResponse(
+export async function repairOllamaResponse(
   turn: VoiceTurn,
   context: SessionContext,
   invalidRaw: string,
   validationErrors: string[],
   modelToUse = modelName
 ): Promise<string> {
-  const model = createModel(modelToUse, turn.languageCode);
-  const repairPrompt = buildRepairPrompt(invalidRaw, validationErrors);
-
-  const chat = model.startChat({ history: context.geminiHistory });
-  const result = await chat.sendMessage(repairPrompt);
-  const text = result.response.text();
-
-  if (!text.trim()) {
-    throw new Error("Gemini repair returned an empty response");
+  if (!client) {
+    throw new Error("OLLAMA_API_KEY not configured for cloud host");
   }
 
-  log.info("Gemini", "Repair response received", {
+  const repairPrompt = buildRepairPrompt(invalidRaw, validationErrors);
+  const response = await client.chat({
+    model: modelToUse,
+    messages: buildMessages(turn, context, repairPrompt),
+    stream: false,
+    format: "json",
+  });
+
+  const text = response.message.content;
+  if (!text.trim()) {
+    throw new Error("Ollama repair returned an empty response");
+  }
+
+  log.info("Ollama", "Repair response received", {
     session: turn.sessionId,
     turn: turn.turnNumber,
   });
@@ -164,15 +165,15 @@ export async function repairGeminiResponse(
 }
 
 /**
- * Stream a Gemini response with retries on transient API errors.
+ * Stream an Ollama response with retries on transient API errors.
  */
-export async function streamGeminiResponse(
+export async function streamOllamaResponse(
   turn: VoiceTurn,
   context: SessionContext,
-  handlers: GeminiStreamHandlers
+  handlers: LlmStreamHandlers
 ): Promise<void> {
-  if (!genAI) {
-    handlers.onError(new Error("GEMINI_API_KEY not configured"));
+  if (!client) {
+    handlers.onError(new Error("OLLAMA_API_KEY not configured for cloud host"));
     return;
   }
 
@@ -186,7 +187,7 @@ export async function streamGeminiResponse(
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
         if (attempt > 0 || modelToUse !== modelName) {
-          log.warn("Gemini", "Retrying request", {
+          log.warn("Ollama", "Retrying request", {
             session: turn.sessionId,
             turn: turn.turnNumber,
             model: modelToUse,
@@ -206,7 +207,7 @@ export async function streamGeminiResponse(
         }
 
         if (isRetryableError(lastError) && modelToUse !== modelsToTry[modelsToTry.length - 1]) {
-          log.warn("Gemini", "Primary model failed, trying fallback", {
+          log.warn("Ollama", "Primary model failed, trying fallback", {
             session: turn.sessionId,
             model: modelToUse,
             error: lastError.message,

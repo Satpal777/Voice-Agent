@@ -4,7 +4,7 @@ import {
 } from "../conversation/interruption-classifier.ts";
 import type { BargeInReason, ConversationState } from "../types/audio.ts";
 import { log } from "./logger.ts";
-import type { GeminiBridge } from "./gemini-bridge.ts";
+import type { LlmBridge } from "./llm-bridge.ts";
 import type { SessionMessenger } from "./session-messenger.ts";
 import type { TranscriptResult } from "./sarvam-stt-bridge.ts";
 import type { TtsBridge } from "./tts-bridge.ts";
@@ -23,7 +23,7 @@ export class VoiceConversationOrchestrator {
 
   constructor(
     private readonly messenger: SessionMessenger,
-    private readonly geminiBridge: GeminiBridge,
+    private readonly llmBridge: LlmBridge,
     private readonly ttsBridge?: TtsBridge
   ) {}
 
@@ -115,7 +115,7 @@ export class VoiceConversationOrchestrator {
       return;
     }
     session.activeTurnId = turnId;
-    this.geminiBridge.setAssistantText(sessionId, assistantText);
+    this.llmBridge.setAssistantText(sessionId, assistantText);
   }
 
   public handleTtsAudio(sessionId: string, turnId: string): void {
@@ -139,7 +139,7 @@ export class VoiceConversationOrchestrator {
     }
 
     if (turnId) {
-      this.geminiBridge.completeTurn(sessionId, turnId);
+      this.llmBridge.completeTurn(sessionId, turnId);
     }
 
     session.activeTurnId = undefined;
@@ -147,7 +147,7 @@ export class VoiceConversationOrchestrator {
   }
 
   private startUserTurn(sessionId: string, result: TranscriptResult): void {
-    this.geminiBridge.handleFinalTranscript(sessionId, result);
+    this.llmBridge.handleFinalTranscript(sessionId, result);
   }
 
   private interrupt(
@@ -177,7 +177,7 @@ export class VoiceConversationOrchestrator {
     });
 
     this.ttsBridge?.cancelTurn(sessionId, turnId);
-    this.geminiBridge.preemptTurn(sessionId, "interrupted", options.spokenFraction);
+    this.llmBridge.preemptTurn(sessionId, "interrupted", options.spokenFraction);
 
     if (options.notifyClient) {
       this.messenger.turnInterrupted(sessionId, turnId, options.reason);

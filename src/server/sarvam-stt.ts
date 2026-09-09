@@ -25,9 +25,9 @@ export function getSarvamSttMode(): SarvamSttMode {
     return "batch";
   }
 
-  // auto (default): prefer realtime when Sarvam is configured
+  // auto (default): prefer batch REST; realtime requires a separate Sarvam entitlement
   if (mode === "auto" || !mode) {
-    return isSarvamConfigured() ? "realtime" : "batch";
+    return "batch";
   }
 
   return "batch";

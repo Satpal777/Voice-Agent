@@ -1,14 +1,14 @@
 import type { VoiceTurn } from "../types/llm.ts";
 
 export interface BuiltVoiceMessage {
-  /** Plain transcript stored in Gemini history */
+  /** Plain transcript stored in chat history */
   historyText: string;
-  /** Message sent to Gemini API (includes turn prefix) */
+  /** Message sent to the LLM API (includes turn prefix) */
   apiText: string;
 }
 
 /**
- * Build user messages for Gemini from a voice turn.
+ * Build user messages for the LLM from a voice turn.
  * History stores clean transcript; API call includes turn metadata prefix.
  */
 export function buildVoiceUserMessage(turn: VoiceTurn): BuiltVoiceMessage {

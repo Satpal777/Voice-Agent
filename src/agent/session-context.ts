@@ -1,4 +1,4 @@
-import type { Content } from "@google/generative-ai";
+import type { ChatMessage } from "../types/llm.ts";
 import { DEFAULT_LANGUAGE_CODE } from "./voice-agent-instructions.ts";
 
 export interface SessionContext {
@@ -6,7 +6,7 @@ export interface SessionContext {
   detectedLanguage: string;
   languageHistory: string[];
   turnCount: number;
-  geminiHistory: Content[];
+  chatHistory: ChatMessage[];
   lastUserTranscript?: string;
   lastAssistantReply?: string;
 }
@@ -24,7 +24,7 @@ export class SessionContextManager {
         detectedLanguage: DEFAULT_LANGUAGE_CODE,
         languageHistory: [],
         turnCount: 0,
-        geminiHistory: [],
+        chatHistory: [],
       };
       this.sessions.set(sessionId, session);
     }
@@ -64,10 +64,10 @@ export class SessionContextManager {
     const session = this.getOrCreate(sessionId);
     session.lastUserTranscript = userText;
     session.lastAssistantReply = assistantText;
-    session.geminiHistory = [
-      ...session.geminiHistory,
-      { role: "user", parts: [{ text: userText }] },
-      { role: "model", parts: [{ text: assistantText }] },
+    session.chatHistory = [
+      ...session.chatHistory,
+      { role: "user", content: userText },
+      { role: "assistant", content: assistantText },
     ];
   }
 

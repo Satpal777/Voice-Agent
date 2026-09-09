@@ -5,11 +5,11 @@ import {
 } from "../agent/session-context.ts";
 import type { VoiceTurn } from "../types/llm.ts";
 import {
-  getGeminiModelName,
-  isGeminiConfigured,
-  repairGeminiResponse,
-  streamGeminiResponse,
-} from "./gemini-client.ts";
+  getLlmModelName,
+  isLlmConfigured,
+  repairOllamaResponse,
+  streamOllamaResponse,
+} from "./ollama-client.ts";
 import { log } from "./logger.ts";
 import type { TranscriptResult } from "./sarvam-stt-bridge.ts";
 import { SARVAM_TRANSCRIBING_PLACEHOLDER_PREFIX } from "./sarvam-stt.ts";
@@ -34,10 +34,10 @@ interface ActiveTurn {
 }
 
 /**
- * Runs one Gemini turn at a time per session. Conversation history is committed
+ * Runs one LLM turn at a time per session. Conversation history is committed
  * exactly once: on playback complete, interrupt, or preemption by a new utterance.
  */
-export class GeminiBridge {
+export class LlmBridge {
   private readonly sessionContexts = new SessionContextManager();
   private readonly activeTurns = new Map<string, ActiveTurn>();
   private readonly onStream: LlmStreamHandler;
@@ -74,13 +74,13 @@ export class GeminiBridge {
       return;
     }
 
-    if (!isGeminiConfigured()) {
+    if (!isLlmConfigured()) {
       return;
     }
 
     const transcript = result.text.trim();
     if (this.isEchoOfAssistantSpeech(sessionId, transcript)) {
-      log.debug("Gemini", "Ignored echo transcript", { session: sessionId, text: transcript });
+      log.debug("LLM", "Ignored echo transcript", { session: sessionId, text: transcript });
       return;
     }
 
@@ -110,12 +110,12 @@ export class GeminiBridge {
       committed: false,
     });
 
-    log.info("Gemini", "Processing turn", {
+    log.info("LLM", "Processing turn", {
       session: sessionId,
       turn: turnNumber,
       lang: languageCode,
       input: turn.transcript,
-      model: getGeminiModelName(),
+      model: getLlmModelName(),
     });
 
     void this.runTurn(sessionId, turnId, turn, abortController);
@@ -163,7 +163,7 @@ export class GeminiBridge {
     this.preemptTurn(sessionId, "interrupted");
     this.ttsBridge?.abortSession(sessionId);
     this.sessionContexts.clear(sessionId);
-    log.debug("Gemini", "Session cleared", { session: sessionId });
+    log.debug("LLM", "Session cleared", { session: sessionId });
   }
 
   private commitActiveTurn(
@@ -230,7 +230,7 @@ export class GeminiBridge {
     const startedAt = Date.now();
 
     try {
-      await streamGeminiResponse(turn, context, {
+      await streamOllamaResponse(turn, context, {
         signal: abortController.signal,
         onGenerating: () => {
           if (abortController.signal.aborted) return;
@@ -258,7 +258,7 @@ export class GeminiBridge {
             language: output.languageCode,
           });
 
-          log.info("Gemini", "Turn complete", {
+          log.info("LLM", "Turn complete", {
             session: sessionId,
             turn: turn.turnNumber,
             lang: output.languageCode,
@@ -277,7 +277,7 @@ export class GeminiBridge {
             return;
           }
 
-          log.error("Gemini", "Turn failed", {
+          log.error("LLM", "Turn failed", {
             session: sessionId,
             turn: turn.turnNumber,
             ms: Date.now() - startedAt,
@@ -313,14 +313,14 @@ export class GeminiBridge {
     let result = parseAndValidate(raw);
 
     if (!result.success) {
-      log.warn("Gemini", "Validation failed, attempting repair", {
+      log.warn("LLM", "Validation failed, attempting repair", {
         session: turn.sessionId,
         turn: turn.turnNumber,
         errors: result.errors,
       });
 
       try {
-        const repaired = await repairGeminiResponse(
+        const repaired = await repairOllamaResponse(
           turn,
           context,
           raw,
@@ -339,7 +339,7 @@ export class GeminiBridge {
 
     if (!result.success) {
       const message = `Invalid LLM output: ${result.errors.join("; ")}`;
-      log.error("Gemini", "Validation failed after repair", {
+      log.error("LLM", "Validation failed after repair", {
         session: turn.sessionId,
         turn: turn.turnNumber,
         errors: result.errors,

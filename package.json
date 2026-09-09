@@ -16,7 +16,7 @@
     "typescript": "^5"
   },
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
+    "ollama": "^0.6.3",
     "sarvamai": "^1.1.8",
     "zod": "^4.5.4"
   }

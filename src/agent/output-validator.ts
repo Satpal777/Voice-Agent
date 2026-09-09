@@ -17,23 +17,28 @@ export interface ValidationFailure {
 export type ValidateResult = ValidationResult | ValidationFailure;
 
 /**
- * Parse a raw Gemini JSON string. Throws on invalid JSON.
+ * Parse a raw LLM JSON string. Throws on invalid JSON.
  */
-export function parseGeminiJson(raw: string): unknown {
+export function parseLlmJson(raw: string): unknown {
   const trimmed = raw.trim();
   if (!trimmed) {
-    throw new Error("Empty response from Gemini");
+    throw new Error("Empty response from LLM");
   }
 
+  const withoutFences = trimmed
+    .replace(/^```(?:json)?\s*/i, "")
+    .replace(/\s*```$/, "")
+    .trim();
+
   try {
-    return JSON.parse(trimmed);
+    return JSON.parse(withoutFences);
   } catch {
-    throw new Error("Gemini response is not valid JSON");
+    throw new Error("LLM response is not valid JSON");
   }
 }
 
 /**
- * Validate parsed or raw Gemini output against the voice agent schema.
+ * Validate parsed or raw LLM output against the voice agent schema.
  */
 export function validateVoiceAgentOutput(input: unknown): ValidateResult {
   const result = VoiceAgentOutputSchema.safeParse(input);
@@ -50,11 +55,11 @@ export function validateVoiceAgentOutput(input: unknown): ValidateResult {
 }
 
 /**
- * Parse and validate a raw Gemini JSON string in one step.
+ * Parse and validate a raw LLM JSON string in one step.
  */
 export function parseAndValidate(raw: string): ValidateResult {
   try {
-    const parsed = parseGeminiJson(raw);
+    const parsed = parseLlmJson(raw);
     const result = validateVoiceAgentOutput(parsed);
     if (!result.success) {
       return { ...result, raw };
@@ -84,7 +89,7 @@ export function sanitizeForTts(output: VoiceAgentOutput): VoiceAgentOutput {
 }
 
 /**
- * Build a repair prompt listing Zod validation errors for a Gemini retry.
+ * Build a repair prompt listing Zod validation errors for an LLM retry.
  */
 export function buildRepairPrompt(raw: string, errors: string[]): string {
   return (
