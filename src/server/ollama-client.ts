@@ -10,6 +10,7 @@ import {
   getOllamaHost,
   getOllamaMaxRetries,
   getOllamaModelName,
+  getOllamaNumPredict,
   isLlmConfigured,
 } from "./llm-config.ts";
 import { log } from "./logger.ts";
@@ -17,6 +18,7 @@ import { log } from "./logger.ts";
 const modelName = getOllamaModelName();
 const fallbackModel = getOllamaFallbackModelName();
 const maxRetries = getOllamaMaxRetries();
+const numPredict = getOllamaNumPredict();
 
 function createClient(): Ollama | null {
   if (!isLlmConfigured()) {
@@ -94,6 +96,7 @@ async function streamOnce(
     messages: buildMessages(turn, context, apiText),
     stream: true,
     format: "json",
+    options: { num_predict: numPredict },
   });
 
   let fullText = "";
@@ -149,6 +152,7 @@ export async function repairOllamaResponse(
     messages: buildMessages(turn, context, repairPrompt),
     stream: false,
     format: "json",
+    options: { num_predict: numPredict },
   });
 
   const text = response.message.content;

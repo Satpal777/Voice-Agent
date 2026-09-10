@@ -7,7 +7,7 @@
     "dev": "bun --watch index.ts",
     "build": "bun build src/client/app.ts --outdir public --target browser",
     "typecheck": "tsc --noEmit",
-    "test": "bun test src/conversation/interruption-classifier.test.ts"
+    "test": "bun test src/conversation src/server/sentence-splitter.test.ts src/agent/message-builder.test.ts"
   },
   "devDependencies": {
     "@types/bun": "latest"

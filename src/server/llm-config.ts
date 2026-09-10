@@ -1,5 +1,6 @@
 const DEFAULT_OLLAMA_HOST = "https://ollama.com";
-const DEFAULT_OLLAMA_MODEL = "gpt-oss:120b";
+const DEFAULT_OLLAMA_MODEL = "gpt-oss:20b";
+const DEFAULT_OLLAMA_FALLBACK_MODEL = "gemma4:31b";
 
 export type LlmProvider = "ollama";
 
@@ -24,11 +25,15 @@ export function getOllamaModelName(): string {
 }
 
 export function getOllamaFallbackModelName(): string {
-  return process.env.OLLAMA_FALLBACK_MODEL || getOllamaModelName();
+  return process.env.OLLAMA_FALLBACK_MODEL || DEFAULT_OLLAMA_FALLBACK_MODEL;
 }
 
 export function getOllamaMaxRetries(): number {
   return Number(process.env.OLLAMA_MAX_RETRIES) || 2;
+}
+
+export function getOllamaNumPredict(): number {
+  return Number(process.env.OLLAMA_NUM_PREDICT) || 2048;
 }
 
 function isCloudHost(host: string): boolean {

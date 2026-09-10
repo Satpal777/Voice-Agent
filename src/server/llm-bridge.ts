@@ -65,7 +65,14 @@ export class LlmBridge {
     this.sttOutput = options.sttOutput;
   }
 
-  public handleFinalTranscript(sessionId: string, result: TranscriptResult): void {
+  public handleFinalTranscript(
+    sessionId: string,
+    result: TranscriptResult,
+    options?: {
+      leftoverSpeech?: string;
+      floorMove?: "clarify" | "steer" | "hard_stop" | "continue";
+    }
+  ): void {
     if (!result.isFinal || !result.text.trim()) {
       return;
     }
@@ -78,10 +85,24 @@ export class LlmBridge {
       return;
     }
 
-    const transcript = result.text.trim();
-    if (this.isEchoOfAssistantSpeech(sessionId, transcript)) {
-      log.debug("LLM", "Ignored echo transcript", { session: sessionId, text: transcript });
+    const incoming = result.text.trim();
+    if (this.isEchoOfAssistantSpeech(sessionId, incoming)) {
+      log.debug("LLM", "Ignored echo transcript", { session: sessionId, text: incoming });
       return;
+    }
+
+    const active = this.activeTurns.get(sessionId);
+    const continuingUtterance = Boolean(active && !active.assistantText);
+    const transcript = continuingUtterance
+      ? `${active!.userTranscript} ${incoming}`.replace(/\s+/g, " ").trim()
+      : incoming;
+
+    if (continuingUtterance) {
+      log.info("LLM", "Appending to in-flight utterance", {
+        session: sessionId,
+        previous: active!.userTranscript,
+        added: incoming,
+      });
     }
 
     this.preemptTurn(sessionId, "superseded");
@@ -99,6 +120,8 @@ export class LlmBridge {
       sttOutput: this.sttOutput,
       requestId: result.requestId,
       timestamp: new Date().toISOString(),
+      leftoverSpeech: options?.leftoverSpeech,
+      floorMove: options?.floorMove,
     };
 
     const abortController = new AbortController();
@@ -115,6 +138,8 @@ export class LlmBridge {
       turn: turnNumber,
       lang: languageCode,
       input: turn.transcript,
+      floorMove: turn.floorMove,
+      leftover: turn.leftoverSpeech ? turn.leftoverSpeech.slice(0, 80) : undefined,
       model: getLlmModelName(),
     });
 
@@ -193,9 +218,14 @@ export class LlmBridge {
     }
   }
 
-  private isEchoOfAssistantSpeech(sessionId: string, transcript: string): boolean {
+  public getActiveUserTranscript(sessionId: string): string | undefined {
+    return this.activeTurns.get(sessionId)?.userTranscript;
+  }
+
+  public isEchoOfAssistantSpeech(sessionId: string, transcript: string): boolean {
     const session = this.sessionContexts.getOrCreate(sessionId);
-    const lastReply = session.lastAssistantReply;
+    const activeReply = this.activeTurns.get(sessionId)?.assistantText;
+    const lastReply = activeReply || session.lastAssistantReply;
     if (!lastReply) {
       return false;
     }
@@ -237,7 +267,9 @@ export class LlmBridge {
           this.onGenerating?.(sessionId, turnId);
         },
         onDone: async ({ fullText }) => {
-          if (abortController.signal.aborted) return;
+          if (abortController.signal.aborted) {
+            return;
+          }
 
           const validated = await this.validateWithRepair(turn, context, fullText, abortController.signal);
           if (!validated || abortController.signal.aborted) {
@@ -246,7 +278,7 @@ export class LlmBridge {
 
           const output = sanitizeForTts(validated);
           const active = this.activeTurns.get(sessionId);
-          if (!active || active.turnId !== turnId) {
+          if (!active || active.turnId !== turnId || abortController.signal.aborted) {
             return;
           }
 

@@ -22,6 +22,8 @@ export interface VoiceTurn {
   sttOutput: string;
   requestId?: string;
   timestamp: string;
+  leftoverSpeech?: string;
+  floorMove?: "clarify" | "steer" | "hard_stop" | "continue";
 }
 
 export interface LlmStreamChunk {

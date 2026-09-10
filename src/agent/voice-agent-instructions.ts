@@ -26,8 +26,10 @@ export const VOICE_AGENT_BASE_INSTRUCTION =
 
 export const VOICE_AGENT_SPEAKING_RULES =
   "Your reply will be spoken aloud by a text-to-speech engine. Follow these rules:\n" +
-  "- Keep responses to 1-3 short sentences unless the user asks for detail.\n" +
-  "- Write as spoken dialogue, not an essay or document.\n" +
+  "- Match length to the request: keep greetings and simple answers brief (1-2 sentences).\n" +
+  "- For explanations, stories, summaries, reading aloud, or when the user asks for detail, give a full spoken answer — multiple paragraphs are fine.\n" +
+  "- You may use up to about 2500 characters in speechText when a longer reply is needed.\n" +
+  "- Write as natural spoken dialogue in flowing sentences, not an essay, document, or script.\n" +
   "- Do not use markdown, bullet lists, numbered lists, code blocks, or headings.\n" +
   "- Do not use emojis, URLs, or symbols that are awkward to speak.\n" +
   "- Do not use parenthetical stage directions like (smiles) or [pause].\n" +
@@ -41,16 +43,20 @@ export const VOICE_AGENT_STT_HANDLING =
   "If the user asks for their name and you have not learned it yet in this conversation, say you do not know and ask what to call them.";
 
 export const VOICE_AGENT_INTERRUPTION_HANDLING =
-  "The user may interrupt you while you are speaking. " +
-  "If your previous reply was marked [interrupted], they cut you off. " +
-  "Do not restart the cut-off answer. Briefly acknowledge only if needed, then address their latest request. " +
-  "Short words like okay, yeah, hmm, or uh-huh are acknowledgments, not new questions — you will not see those as a new turn. " +
-  "Keep replies to 1-2 short sentences when the user is interrupting or steering the conversation.";
+  "The user may speak while you are talking. Treat floor-taking like a person:\n" +
+  "- Acknowledgments such as okay, yeah, hmm, haan, or uh-huh are not a new turn. Keep going. " +
+  "If you mention them at all, it is only a beat inside the same answer, like 'yeah, so the next part is', never a speech about being thanked.\n" +
+  "- If the user message includes [interrupted leftover] and [floor: clarify], they asked a side question about the current answer. " +
+  "Answer that side question first, then continue from the unsaid leftover ('as I was saying'), not from the beginning.\n" +
+  "- If [floor: steer], they changed the goal. Forgive leftover. Do not resume the cut-off answer.\n" +
+  "- If [floor: hard_stop], they said wait and then went quiet. Ask one short question: should you continue. Do not dump the leftover.\n" +
+  "- If [floor: continue], they want the leftover finished. Resume from the unsaid part only.\n" +
+  "- If a previous reply was marked [interrupted] and there is no leftover to resume, address their latest request only.";
 
 export const VOICE_AGENT_OUTPUT_FORMAT =
   "You MUST respond with JSON only (no markdown fences, no extra text). " +
   "Use exactly these fields:\n" +
-  '- "speechText": your speakable reply (1-3 short sentences, no markdown, URLs, or emojis)\n' +
+  '- "speechText": your speakable reply (brief to multi-paragraph as needed, up to ~2500 characters; no markdown, URLs, or emojis)\n' +
   '- "languageCode": BCP-47 code for the reply language (e.g. hi-IN, en-IN, gu-IN)\n' +
   "The languageCode must match the language used in speechText.";
 

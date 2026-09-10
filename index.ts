@@ -70,7 +70,9 @@ if (isSarvamTtsConfigured()) {
       if (ttsBridge?.isTurnCancelled(sessionId, payload.turnId)) {
         return;
       }
-      orchestrator?.handleTtsAudio(sessionId, payload.turnId);
+      if (orchestrator?.handleTtsAudio(sessionId, payload.turnId) === false) {
+        return;
+      }
       messenger?.ttsAudio(sessionId, payload);
     },
     {
@@ -87,7 +89,10 @@ if (isSarvamTtsConfigured()) {
 if (isLlmConfigured()) {
   llmBridge = new LlmBridge(
     (sessionId, chunk) => {
-      orchestrator?.handleLlmFinal(sessionId, chunk.turnId, chunk.text);
+      const accepted = orchestrator?.handleLlmFinal(sessionId, chunk.turnId, chunk.text);
+      if (accepted === false) {
+        return;
+      }
       messenger?.llmFinal(sessionId, chunk);
     },
     {

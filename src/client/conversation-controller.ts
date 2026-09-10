@@ -4,7 +4,7 @@ import type {
   ConversationState,
   ServerWsMessage,
 } from "../types/audio.ts";
-import { classifyInterruptionIntent } from "../conversation/interruption-classifier.ts";
+import { classifyInterruptionIntent, yieldsAssistantFloor } from "../conversation/interruption-classifier.ts";
 import type { AudioPlayer } from "./audio-player.ts";
 import type { VoiceStreamClient } from "./voice-stream-client.ts";
 
@@ -147,7 +147,14 @@ export class ConversationController {
       return;
     }
 
-    if (classifyInterruptionIntent(text, isFinal).intent !== "interrupt") {
+    const classification = classifyInterruptionIntent(text, isFinal);
+    if (!yieldsAssistantFloor(classification.intent)) {
+      return;
+    }
+
+    // While the assistant is still thinking, extra user speech is a continuation
+    // of the question, not barge-in. Only a hard stop cancels thinking.
+    if (this.state === "processing" && classification.intent !== "hard_stop") {
       return;
     }
 
