@@ -620,8 +620,8 @@ select {
   position: fixed;
   left: 50%;
   bottom: calc(var(--dock-h) + var(--safe-b) + 0.75rem);
-  transform: translateX(-50%) translateY(120%);
-  z-index: 20;
+  transform: translateX(-50%) translateY(1.25rem);
+  z-index: 11;
   max-width: min(92vw, 28rem);
   padding: 0.75rem 1rem;
   border-radius: 0.9rem;
@@ -629,11 +629,17 @@ select {
   border: 1px solid rgba(251, 113, 133, 0.4);
   color: #fecdd3;
   font-size: 0.85rem;
-  transition: transform 280ms var(--ease-out);
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition: transform 280ms var(--ease-out), opacity 280ms ease, visibility 280ms;
 }
 
 .toast.show {
   transform: translateX(-50%) translateY(0);
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
 }
 
 .sr-only {
