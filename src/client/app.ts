@@ -26,49 +26,71 @@ export class VoiceAssistantApp {
   private statBytes!: HTMLElement;
   private statDuration!: HTMLElement;
   private volumeBar!: HTMLElement;
-  private transcriptInterim!: HTMLElement;
-  private transcriptFinals!: HTMLElement;
-  private assistantStreaming!: HTMLElement;
-  private assistantFinals!: HTMLElement;
+  private volumeBarWrap!: HTMLElement;
+  private orb!: HTMLElement;
+  private waveform!: HTMLElement;
+  private waveformBars: HTMLElement[] = [];
+  private stateCopy!: HTMLElement;
+  private thread!: HTMLElement;
+  private emptyState!: HTMLElement;
+  private liveBubble?: HTMLElement;
+  private thinkingBubble?: HTMLElement;
+  private btnSettings!: HTMLButtonElement;
+  private settingsSheet!: HTMLElement;
+  private toastEl!: HTMLElement;
+  private modePure!: HTMLButtonElement;
+  private modePro!: HTMLButtonElement;
 
   constructor() {
     this.conversation = new ConversationController(this.client, this.audioPlayer, {
       onConversationState: (state, turnId) => this.updateConversationBadge(state, turnId),
       onTranscriptPartial: (text, isBackchannelAck) => {
-        this.transcriptInterim.textContent = isBackchannelAck ? `${text} (listening…)` : text;
-        this.transcriptInterim.classList.toggle("backchannel", Boolean(isBackchannelAck));
-        this.transcriptInterim.style.display = "block";
+        this.hideEmptyState();
+        if (!this.liveBubble) {
+          this.liveBubble = this.appendBubble("live");
+        }
+        this.liveBubble.classList.toggle("backchannel", Boolean(isBackchannelAck));
+        this.liveBubble.textContent = isBackchannelAck ? `${text} (listening…)` : text;
+        this.scrollThread();
       },
       onTranscriptFinal: (text, language) => {
-        this.transcriptInterim.textContent = "";
-        this.transcriptInterim.classList.remove("backchannel");
-        this.transcriptInterim.style.display = "none";
-
-        const entry = document.createElement("div");
-        entry.className = "transcript-entry";
-        const lang = language ? ` [${language}]` : "";
-        entry.textContent = `${text}${lang}`;
-        this.transcriptFinals.appendChild(entry);
-        this.transcriptFinals.scrollTop = this.transcriptFinals.scrollHeight;
+        this.hideEmptyState();
+        this.liveBubble?.remove();
+        this.liveBubble = undefined;
+        const bubble = this.appendBubble("user");
+        bubble.textContent = text;
+        if (language) {
+          const lang = document.createElement("span");
+          lang.className = "lang";
+          lang.textContent = language;
+          bubble.appendChild(lang);
+        }
+        this.scrollThread();
       },
       onAssistantGenerating: () => {
-        this.assistantStreaming.textContent = "Thinking...";
-        this.assistantStreaming.style.display = "block";
+        this.hideEmptyState();
+        this.thinkingBubble?.remove();
+        this.thinkingBubble = this.appendBubble("assistant thinking");
+        this.thinkingBubble.innerHTML =
+          '<span class="dot"></span><span class="dot"></span><span class="dot"></span> Thinking';
+        this.scrollThread();
       },
       onAssistantFinal: (text, language) => {
-        this.assistantStreaming.textContent = "";
-        this.assistantStreaming.style.display = "none";
-
-        const entry = document.createElement("div");
-        entry.className = "assistant-entry";
-        const lang = language ? ` [${language}]` : "";
-        entry.textContent = `${text}${lang}`;
-        this.assistantFinals.appendChild(entry);
-        this.assistantFinals.scrollTop = this.assistantFinals.scrollHeight;
+        this.thinkingBubble?.remove();
+        this.thinkingBubble = undefined;
+        const bubble = this.appendBubble("assistant");
+        bubble.textContent = text;
+        if (language) {
+          const lang = document.createElement("span");
+          lang.className = "lang";
+          lang.textContent = language;
+          bubble.appendChild(lang);
+        }
+        this.scrollThread();
       },
       onTurnInterrupted: () => {
-        this.assistantStreaming.textContent = "";
-        this.assistantStreaming.style.display = "none";
+        this.thinkingBubble?.remove();
+        this.thinkingBubble = undefined;
       },
     });
   }
@@ -94,10 +116,19 @@ export class VoiceAssistantApp {
     this.statBytes = document.getElementById("stat-bytes") as HTMLElement;
     this.statDuration = document.getElementById("stat-duration") as HTMLElement;
     this.volumeBar = document.getElementById("volume-bar") as HTMLElement;
-    this.transcriptInterim = document.getElementById("transcript-interim") as HTMLElement;
-    this.transcriptFinals = document.getElementById("transcript-finals") as HTMLElement;
-    this.assistantStreaming = document.getElementById("assistant-streaming") as HTMLElement;
-    this.assistantFinals = document.getElementById("assistant-finals") as HTMLElement;
+    this.volumeBarWrap = this.volumeBar.parentElement as HTMLElement;
+    this.orb = document.getElementById("orb") as HTMLElement;
+    this.waveform = document.getElementById("waveform") as HTMLElement;
+    this.stateCopy = document.getElementById("state-copy") as HTMLElement;
+    this.thread = document.getElementById("conversation-thread") as HTMLElement;
+    this.emptyState = document.getElementById("empty-state") as HTMLElement;
+    this.btnSettings = document.getElementById("btn-settings") as HTMLButtonElement;
+    this.settingsSheet = document.getElementById("settings-sheet") as HTMLElement;
+    this.toastEl = document.getElementById("toast") as HTMLElement;
+    this.modePure = document.getElementById("mode-pure") as HTMLButtonElement;
+    this.modePro = document.getElementById("mode-pro") as HTMLButtonElement;
+    this.buildWaveform();
+    this.restoreMode();
   }
 
   private setupListeners(): void {
@@ -111,12 +142,15 @@ export class VoiceAssistantApp {
     this.mic.onVolume((rms) => {
       const percentage = Math.min(100, Math.round(rms * 100));
       this.volumeBar.style.width = `${percentage}%`;
+      this.volumeBarWrap.setAttribute("aria-valuenow", String(percentage));
+      this.orb.style.setProperty("--level", String(percentage / 100));
+      this.updateWaveform(percentage);
       this.conversation.handleVolume(rms);
     });
 
     this.mic.onError((error) => {
       console.error("Microphone error:", error);
-      alert(`Microphone error: ${error.message}`);
+      this.showToast(`Microphone error: ${error.message}`);
       this.stop();
     });
 
@@ -132,6 +166,7 @@ export class VoiceAssistantApp {
 
       if (msg.type === "error" && msg.message) {
         console.error("[Server Error]", msg.message);
+        this.showToast(msg.message);
         return;
       }
 
@@ -143,6 +178,18 @@ export class VoiceAssistantApp {
         this.stop();
       } else {
         this.start();
+      }
+    });
+
+    this.btnSettings.addEventListener("click", () => this.setSheetOpen(true));
+    this.settingsSheet.querySelectorAll("[data-close-sheet]").forEach((el) => {
+      el.addEventListener("click", () => this.setSheetOpen(false));
+    });
+    this.modePure.addEventListener("click", () => this.setMode("pure"));
+    this.modePro.addEventListener("click", () => this.setMode("pro"));
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape") {
+        this.setSheetOpen(false);
       }
     });
   }
@@ -184,13 +231,15 @@ export class VoiceAssistantApp {
       this.updateConversationBadge("listening");
 
       this.btnToggle.disabled = false;
-      this.btnToggle.textContent = "Stop Voice Stream";
+      this.btnToggle.textContent = "Stop listening";
       this.btnToggle.classList.add("recording");
       this.selectDevice.disabled = true;
     } catch (err) {
       this.btnToggle.disabled = false;
-      this.btnToggle.textContent = "Start Voice Stream";
+      this.btnToggle.textContent = "Start listening";
       this.selectDevice.disabled = false;
+      const message = err instanceof Error ? err.message : "Failed to start voice stream";
+      this.showToast(message);
       console.error("Failed to start voice stream:", err);
     }
   }
@@ -203,11 +252,15 @@ export class VoiceAssistantApp {
     this.stopTimer();
 
     this.btnToggle.disabled = false;
-    this.btnToggle.textContent = "Start Voice Stream";
+    this.btnToggle.textContent = "Start listening";
     this.btnToggle.classList.remove("recording");
     this.selectDevice.disabled = false;
     this.volumeBar.style.width = "0%";
-    this.updateConversationBadge("listening");
+    this.orb.style.setProperty("--level", "0");
+    this.updateWaveform(0);
+    this.setOrbState("idle");
+    this.stateCopy.textContent = "Ready when you are";
+    this.conversationBadge.textContent = "Idle";
   }
 
   private startTimer(): void {
@@ -232,41 +285,108 @@ export class VoiceAssistantApp {
   }
 
   private clearTranscripts(): void {
-    this.transcriptInterim.textContent = "";
-    this.transcriptInterim.style.display = "none";
-    this.transcriptFinals.innerHTML = "";
-    this.assistantStreaming.textContent = "";
-    this.assistantStreaming.style.display = "none";
-    this.assistantFinals.innerHTML = "";
+    this.liveBubble = undefined;
+    this.thinkingBubble = undefined;
+    this.thread.replaceChildren(this.emptyState);
+    this.emptyState.hidden = false;
+  }
+
+  private hideEmptyState(): void {
+    this.emptyState.hidden = true;
+    if (this.emptyState.parentElement) {
+      this.emptyState.remove();
+    }
+  }
+
+  private appendBubble(kind: string): HTMLElement {
+    const bubble = document.createElement("div");
+    bubble.className = `bubble ${kind}`;
+    this.thread.appendChild(bubble);
+    return bubble;
+  }
+
+  private scrollThread(): void {
+    this.thread.scrollTop = this.thread.scrollHeight;
+  }
+
+  private buildWaveform(): void {
+    this.waveform.replaceChildren();
+    this.waveformBars = [];
+    for (let i = 0; i < 12; i++) {
+      const bar = document.createElement("span");
+      this.waveform.appendChild(bar);
+      this.waveformBars.push(bar);
+    }
+  }
+
+  private updateWaveform(percentage: number): void {
+    this.waveformBars.forEach((bar, i) => {
+      const wave = 0.35 + ((i * 13) % 10) / 16;
+      const height = Math.max(12, percentage * wave);
+      bar.style.height = `${height}%`;
+    });
+  }
+
+  private setOrbState(state: "idle" | ConversationState): void {
+    this.orb.dataset.state = state;
+  }
+
+  private setSheetOpen(open: boolean): void {
+    this.settingsSheet.hidden = !open;
+    this.settingsSheet.classList.toggle("open", open);
+    this.btnSettings.setAttribute("aria-expanded", String(open));
+  }
+
+  private setMode(mode: "pure" | "pro"): void {
+    document.body.dataset.mode = mode;
+    this.modePure.setAttribute("aria-selected", String(mode === "pure"));
+    this.modePro.setAttribute("aria-selected", String(mode === "pro"));
+    try {
+      localStorage.setItem("va-motion-mode", mode);
+    } catch {
+      /* ignore quota / private mode */
+    }
+  }
+
+  private restoreMode(): void {
+    try {
+      const saved = localStorage.getItem("va-motion-mode");
+      if (saved === "pure" || saved === "pro") {
+        this.setMode(saved);
+      }
+    } catch {
+      /* ignore */
+    }
+  }
+
+  private showToast(message: string): void {
+    this.toastEl.textContent = message;
+    this.toastEl.classList.add("show");
+    window.setTimeout(() => this.toastEl.classList.remove("show"), 4200);
   }
 
   private updateConnectionBadge(state: ConnectionState): void {
-    const labels: Record<ConnectionState, { text: string; color: string }> = {
-      disconnected: { text: "Offline", color: "var(--color-disconnected)" },
-      connecting: { text: "Connecting...", color: "var(--color-connecting)" },
-      connected: { text: "Connected", color: "var(--color-connected)" },
-      streaming: { text: "Streaming Live (16kHz PCM)", color: "var(--color-recording)" },
+    const labels: Record<ConnectionState, string> = {
+      disconnected: "Offline",
+      connecting: "Connecting",
+      connected: "Connected",
+      streaming: "Live",
     };
 
-    const info = labels[state] ?? labels.disconnected;
-    this.statusBadge.textContent = info.text;
-    this.statusBadge.style.backgroundColor = info.color;
+    this.statusBadge.textContent = labels[state] ?? labels.disconnected;
+    this.statusBadge.dataset.state = state;
   }
 
   private updateConversationBadge(state: ConversationState, _turnId?: string): void {
-    const labels: Record<ConversationState, { text: string; color: string; className: string }> = {
-      listening: { text: "Listening", color: "var(--color-connected)", className: "" },
-      processing: { text: "Thinking", color: "var(--color-connecting)", className: "thinking" },
-      speaking: { text: "Speaking", color: "var(--color-primary)", className: "speaking" },
+    const copy: Record<ConversationState, string> = {
+      listening: "Listening",
+      processing: "Thinking",
+      speaking: "Speaking",
     };
 
-    const info = labels[state];
-    this.conversationBadge.textContent = info.text;
-    this.conversationBadge.style.backgroundColor = info.color;
-    this.conversationBadge.classList.remove("speaking", "thinking");
-    if (info.className) {
-      this.conversationBadge.classList.add(info.className);
-    }
+    this.conversationBadge.textContent = copy[state];
+    this.stateCopy.textContent = copy[state];
+    this.setOrbState(this.mic.capturing ? state : "idle");
   }
 }
 
