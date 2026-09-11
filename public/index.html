@@ -2,387 +2,116 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Voice Assistant - Voice Input Stream</title>
-  <style>
-    :root {
-      --bg-primary: #0f172a;
-      --bg-card: #1e293b;
-      --text-main: #f8fafc;
-      --text-muted: #94a3b8;
-      --border-color: #334155;
-      --primary: #3b82f6;
-      --primary-hover: #2563eb;
-      --danger: #ef4444;
-      --danger-hover: #dc2626;
-      --color-disconnected: #64748b;
-      --color-connecting: #eab308;
-      --color-connected: #10b981;
-      --color-recording: #ef4444;
-      --color-primary: #3b82f6;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background-color: var(--bg-primary);
-      color: var(--text-main);
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 1.5rem;
-    }
-
-    .container {
-      width: 100%;
-      max-width: 580px;
-      background-color: var(--bg-card);
-      border: 1px solid var(--border-color);
-      border-radius: 1rem;
-      padding: 2rem;
-      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.5);
-    }
-
-    header {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 1.5rem;
-      padding-bottom: 1rem;
-      border-bottom: 1px solid var(--border-color);
-      flex-wrap: wrap;
-      gap: 0.5rem;
-    }
-
-    .header-badges {
-      display: flex;
-      gap: 0.5rem;
-      flex-wrap: wrap;
-    }
-
-    h1 {
-      font-size: 1.25rem;
-      font-weight: 700;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .badge {
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.25rem 0.75rem;
-      border-radius: 9999px;
-      background-color: var(--color-disconnected);
-      color: #ffffff;
-      transition: background-color 0.2s ease, box-shadow 0.2s ease;
-    }
-
-    .badge.speaking {
-      animation: speakingPulse 1.4s ease-in-out infinite;
-    }
-
-    @keyframes speakingPulse {
-      0%, 100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.45); }
-      50% { box-shadow: 0 0 0 6px rgba(59, 130, 246, 0); }
-    }
-
-    .badge.thinking {
-      animation: thinkingPulse 1s ease-in-out infinite alternate;
-    }
-
-    @keyframes thinkingPulse {
-      from { opacity: 0.75; }
-      to { opacity: 1; }
-    }
-
-    .form-group {
-      margin-bottom: 1.25rem;
-    }
-
-    label {
-      display: block;
-      font-size: 0.875rem;
-      font-weight: 500;
-      color: var(--text-muted);
-      margin-bottom: 0.5rem;
-    }
-
-    select {
-      width: 100%;
-      padding: 0.75rem 1rem;
-      border-radius: 0.5rem;
-      background-color: #0f172a;
-      border: 1px solid var(--border-color);
-      color: var(--text-main);
-      font-size: 0.875rem;
-      outline: none;
-      transition: border-color 0.2s ease;
-    }
-
-    select:focus {
-      border-color: var(--primary);
-      box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.4);
-    }
-
-    select:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    .volume-container {
-      margin-bottom: 1.5rem;
-    }
-
-    .volume-bar-bg {
-      height: 10px;
-      background-color: #0f172a;
-      border-radius: 5px;
-      overflow: hidden;
-      border: 1px solid var(--border-color);
-    }
-
-    .volume-bar {
-      height: 100%;
-      width: 0%;
-      background: linear-gradient(90deg, #10b981 0%, #3b82f6 70%, #ef4444 100%);
-      border-radius: 5px;
-      transition: width 0.05s ease-out;
-    }
-
-    .btn-main {
-      width: 100%;
-      padding: 1rem;
-      border: none;
-      border-radius: 0.5rem;
-      background-color: var(--primary);
-      color: white;
-      font-size: 1rem;
-      font-weight: 600;
-      cursor: pointer;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      gap: 0.5rem;
-      transition: background-color 0.2s ease, transform 0.1s ease;
-    }
-
-    .btn-main:hover:not(:disabled) {
-      background-color: var(--primary-hover);
-    }
-
-    .btn-main:focus-visible {
-      outline: 2px solid #ffffff;
-      outline-offset: 2px;
-    }
-
-    .btn-main.recording {
-      background-color: var(--danger);
-    }
-
-    .btn-main.recording:hover:not(:disabled) {
-      background-color: var(--danger-hover);
-    }
-
-    .btn-main:disabled {
-      opacity: 0.6;
-      cursor: not-allowed;
-    }
-
-    .stats-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 0.75rem;
-      margin-top: 1.5rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .stat-card {
-      background-color: #0f172a;
-      border: 1px solid var(--border-color);
-      border-radius: 0.5rem;
-      padding: 0.75rem;
-      text-align: center;
-    }
-
-    .stat-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      margin-bottom: 0.25rem;
-    }
-
-    .stat-value {
-      font-size: 1.125rem;
-      font-weight: 700;
-      color: var(--text-main);
-      font-variant-numeric: tabular-nums;
-    }
-
-    .spec-info {
-      margin-top: 1.25rem;
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-align: center;
-      line-height: 1.5;
-    }
-
-    .transcript-panel {
-      margin-top: 1.5rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .transcript-panel h2 {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.75rem;
-    }
-
-    .transcript-interim {
-      font-size: 0.9375rem;
-      color: var(--text-muted);
-      font-style: italic;
-      min-height: 1.5rem;
-      margin-bottom: 0.75rem;
-      display: none;
-    }
-
-    .transcript-interim.backchannel {
-      color: #64748b;
-      opacity: 0.85;
-    }
-
-    .transcript-finals {
-      max-height: 200px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-    }
-
-    .transcript-entry {
-      background-color: #0f172a;
-      border: 1px solid var(--border-color);
-      border-radius: 0.5rem;
-      padding: 0.75rem 1rem;
-      font-size: 0.9375rem;
-      line-height: 1.5;
-    }
-
-    .assistant-panel {
-      margin-top: 1.5rem;
-      padding-top: 1.5rem;
-      border-top: 1px solid var(--border-color);
-    }
-
-    .assistant-panel h2 {
-      font-size: 0.875rem;
-      font-weight: 600;
-      color: var(--text-muted);
-      margin-bottom: 0.75rem;
-    }
-
-    .assistant-streaming {
-      background-color: #0f172a;
-      border: 1px solid var(--primary);
-      border-radius: 0.5rem;
-      padding: 0.75rem 1rem;
-      font-size: 0.9375rem;
-      line-height: 1.5;
-      min-height: 2.5rem;
-      color: var(--text-main);
-      display: none;
-    }
-
-    .assistant-finals {
-      max-height: 200px;
-      overflow-y: auto;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      margin-top: 0.5rem;
-    }
-
-    .assistant-entry {
-      background-color: #0f172a;
-      border: 1px solid var(--border-color);
-      border-left: 3px solid var(--primary);
-      border-radius: 0.5rem;
-      padding: 0.75rem 1rem;
-      font-size: 0.9375rem;
-      line-height: 1.5;
-    }
-  </style>
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07090f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Voice Agent</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
 </head>
-<body>
-  <main class="container" role="region" aria-label="Voice Stream Controls">
-    <header>
-      <h1>🎙️ Voice Assistant</h1>
-      <div class="header-badges">
-        <div id="conversation-badge" class="badge" aria-live="polite">Listening</div>
-        <div id="status-badge" class="badge" aria-live="polite">Offline</div>
-      </div>
-    </header>
+<body data-mode="pure">
+  <div class="ambient" aria-hidden="true"></div>
+  <a class="skip-link" href="#btn-toggle">Skip to microphone</a>
 
-    <div class="form-group">
-      <label for="select-device">Microphone Input</label>
+  <header class="app-header">
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div>
+        <h1>Voice Agent</h1>
+        <p class="brand-sub">Live STT · LLM · TTS</p>
+      </div>
+    </div>
+    <div class="header-actions">
+      <div id="status-badge" class="pill" data-state="disconnected" aria-live="polite">Offline</div>
+      <div class="mode-switch" role="tablist" aria-label="Animation mode">
+        <button type="button" role="tab" id="mode-pure" aria-selected="true">Pure</button>
+        <button type="button" role="tab" id="mode-pro" aria-selected="false">Pro</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="app-shell">
+    <section class="stage" aria-label="Voice presence">
+      <div id="orb" class="orb" data-state="idle" aria-hidden="true">
+        <div class="orb-glow"></div>
+        <div class="orb-ring r1"></div>
+        <div class="orb-ring r2"></div>
+        <div class="orb-ring r3"></div>
+        <div class="orb-core"></div>
+        <div id="waveform" class="waveform"></div>
+      </div>
+      <p id="state-copy" class="state-copy">Ready when you are</p>
+      <div id="conversation-badge" class="sr-only" aria-live="polite">Idle</div>
+    </section>
+
+    <section class="thread-wrap" aria-label="Conversation">
+      <div id="conversation-thread" class="thread">
+        <div id="empty-state" class="empty-state">
+          <strong>Start a voice session</strong>
+          Speak naturally. The assistant will listen, think, and answer — interrupt anytime.
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="dock">
+    <button id="btn-settings" class="icon-btn" type="button" aria-label="Open settings" aria-controls="settings-sheet" aria-expanded="false">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+        <circle cx="12" cy="12" r="3"></circle>
+        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09A1.65 1.65 0 0 0 15 4.6a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+      </svg>
+    </button>
+    <div class="mic-wrap">
+      <button id="btn-toggle" class="mic-btn" type="button" aria-live="assertive">Start listening</button>
+    </div>
+    <div class="dock-side" aria-hidden="true"></div>
+  </footer>
+
+  <div id="settings-sheet" class="sheet" hidden>
+    <div class="sheet-backdrop" data-close-sheet></div>
+    <div class="sheet-panel" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+      <div class="sheet-head">
+        <h2 id="settings-title">Session</h2>
+        <button type="button" class="sheet-close" data-close-sheet aria-label="Close settings">&times;</button>
+      </div>
+
+      <label for="select-device">Microphone</label>
       <select id="select-device" aria-label="Select audio input device">
         <option value="">Default Microphone</option>
       </select>
+
+      <div class="volume-container">
+        <label id="volume-label" for="volume-bar">Microphone level</label>
+        <div class="volume-bar-bg" role="progressbar" aria-labelledby="volume-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
+          <div id="volume-bar" class="volume-bar"></div>
+        </div>
+      </div>
+
+      <div class="stats-grid" aria-label="Streaming statistics">
+        <div class="stat-card">
+          <div class="stat-label">Duration</div>
+          <div id="stat-duration" class="stat-value">0.0s</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Chunks</div>
+          <div id="stat-chunks" class="stat-value">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="stat-label">Streamed</div>
+          <div id="stat-bytes" class="stat-value">0.0 KB</div>
+        </div>
+      </div>
+
+      <p class="spec-info">
+        Audio: <strong>16 kHz · 16-bit PCM · mono</strong><br>
+        Sarvam STT → Ollama LLM → Sarvam TTS with barge-in.
+      </p>
     </div>
+  </div>
 
-    <div class="volume-container">
-      <label id="volume-label" for="volume-bar">Microphone Level</label>
-      <div class="volume-bar-bg" role="progressbar" aria-labelledby="volume-label" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0">
-        <div id="volume-bar" class="volume-bar"></div>
-      </div>
-    </div>
-
-    <button id="btn-toggle" class="btn-main" type="button" aria-live="assertive">
-      Start Voice Stream
-    </button>
-
-    <div class="stats-grid" aria-label="Streaming Statistics">
-      <div class="stat-card">
-        <div class="stat-label">Duration</div>
-        <div id="stat-duration" class="stat-value">0.0s</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Chunks Sent</div>
-        <div id="stat-chunks" class="stat-value">0</div>
-      </div>
-      <div class="stat-card">
-        <div class="stat-label">Streamed</div>
-        <div id="stat-bytes" class="stat-value">0.0 KB</div>
-      </div>
-    </div>
-
-    <section class="transcript-panel" aria-label="Speech Transcription">
-      <h2>Transcription</h2>
-      <div id="transcript-interim" class="transcript-interim" aria-live="polite"></div>
-      <div id="transcript-finals" class="transcript-finals" aria-live="polite"></div>
-    </section>
-
-    <section class="assistant-panel" aria-label="Assistant Response">
-      <h2>Assistant</h2>
-      <div id="assistant-streaming" class="assistant-streaming" aria-live="polite"></div>
-      <div id="assistant-finals" class="assistant-finals" aria-live="polite"></div>
-    </section>
-
-    <p class="spec-info">
-      Audio Stream Format: <strong>16,000 Hz &bull; 16-bit Linear PCM &bull; Mono</strong><br>
-      Sarvam STT &rarr; Ollama LLM &rarr; Sarvam TTS with barge-in support.
-    </p>
-  </main>
+  <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
   <script type="module" src="/app.js"></script>
 </body>
